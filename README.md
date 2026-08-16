@@ -10,6 +10,10 @@ This is an Android-focused fork of [PopTracker](https://github.com/black-sliver/
 
 The fork keeps PopTracker's native C++/SDL engine, Lua pack APIs, JSON layouts, images, saves, ZIP reader and Archipelago client. Existing tracker packs therefore run through the same engine instead of being converted to a separate Android format.
 
+## ☕ Support this little port
+
+If PopTracker for Android makes your randomizer adventures a little nicer, you can [leave Odrannnn a coffee on Ko-fi](https://ko-fi.com/odrannnn). Every bit of support is appreciated! 💜
+
 ## What this fork adds
 
 - An Android Studio/Gradle project targeting Android 5.0 (API 21) and newer.
