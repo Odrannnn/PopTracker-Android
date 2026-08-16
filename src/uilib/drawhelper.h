@@ -4,6 +4,8 @@
 
 namespace Ui {
 
+void fillRoundedRect(Renderer renderer, const SDL_Rect& rect, int radius, Widget::Color color);
+
 void drawRect(Renderer renderer, Position pos, Size size, int borderWidth,
         Widget::Color topC, Widget::Color leftC, Widget::Color botC, Widget::Color rightC);
 

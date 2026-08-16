@@ -14,7 +14,9 @@
 #include <cstring>
 #include <climits>
 
-#ifndef _WIN32
+#if defined(__ANDROID__)
+#include <SDL2/SDL_system.h>
+#elif !defined(_WIN32)
 #include <pwd.h>
 #include <unistd.h>
 #endif
@@ -52,8 +54,18 @@ namespace fs {
     using std::filesystem::copy;
     using std::filesystem::copy_options;
     using std::filesystem::file_size;
+#if !defined(__ANDROID__)
     using std::filesystem::temp_directory_path;
+#endif
     using std::error_code;
+
+#if defined(__ANDROID__)
+    inline path temp_directory_path()
+    {
+        const char* storage = SDL_AndroidGetInternalStoragePath();
+        return storage && *storage ? path(storage) / "tmp" : path("tmp");
+    }
+#endif
 }
 
 #else
@@ -167,7 +179,10 @@ namespace fs {
 namespace  fs {
     inline path app_path()
     {
-#if defined _WIN32
+#if defined __ANDROID__
+        const char* storage = SDL_AndroidGetInternalStoragePath();
+        return storage && *storage ? storage : "";
+#elif defined _WIN32
         wchar_t result[_MAX_PATH+1];
         if (GetModuleFileNameW(nullptr, result, _MAX_PATH) < 1) {
             fprintf(stderr, "Warning: could not get app path!\n");
@@ -196,15 +211,20 @@ namespace  fs {
         result[PATH_MAX] = 0;
         char* slash = strrchr(result, '/');
 #endif
+#if !defined __ANDROID__
         if (!slash)
             return "";
         *slash = 0;
         return result;
+#endif
     }
 
     inline path home_path()
     {
-#ifdef _WIN32
+#if defined __ANDROID__
+        const char* storage = SDL_AndroidGetInternalStoragePath();
+        return storage && *storage ? storage : "";
+#elif defined _WIN32
         wchar_t result[_MAX_PATH+1];
         if (SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, SHGFP_TYPE_CURRENT, result) != 0) {
             fprintf(stderr, "Warning: could not get Home path!\n");
@@ -229,7 +249,11 @@ namespace  fs {
 
     inline path documents_path()
     {
-#ifdef _WIN32
+#if defined __ANDROID__
+        // Android's Storage Access Framework is bridged by PopTrackerActivity.
+        // Internal configuration, saves and packs still need ordinary paths.
+        return home_path();
+#elif defined _WIN32
         wchar_t result[_MAX_PATH+1];
         if (SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, SHGFP_TYPE_CURRENT, result) != 0) {
             fprintf(stderr, "Warning: could not get My Documents path!\n");

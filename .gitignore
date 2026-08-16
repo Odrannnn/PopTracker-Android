@@ -41,6 +41,15 @@ win32-lib-src
 /crash-*
 macosx/libs/
 
+# Android/Gradle build output and machine-local SDK settings
+android/.gradle/
+android/.idea/
+android/**/.cxx/
+android/**/build/
+android/local.properties
+*.apk
+*.aab
+
 # exclude development environment specific files
 .vs/
 CppProperties.json

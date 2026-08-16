@@ -36,6 +36,7 @@ public:
     Signal<const std::string&, int> onMenuPressed;
     
     static const std::string MENU_LOAD;
+    static const std::string MENU_IMPORT_PACK;
     static const std::string MENU_RELOAD;
     static const std::string MENU_LOAD_STATE;
     static const std::string MENU_SAVE_STATE;

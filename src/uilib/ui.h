@@ -36,6 +36,21 @@ protected:
     unsigned _hardwareFpsLimit = DEFAULT_FPS_LIMIT;
     unsigned _softwareFpsLimit = DEFAULT_SOFTWARE_FPS_LIMIT;
 
+#ifdef __ANDROID__
+    struct AndroidFinger {
+        float x = 0.0f;
+        float y = 0.0f;
+        Uint32 windowID = 0;
+    };
+
+    Uint32 _androidTouchDownAt = 0;
+    Uint32 _androidTouchWindow = 0;
+    int _androidTouchX = 0;
+    int _androidTouchY = 0;
+    bool _androidTouchMoved = false;
+    std::map<SDL_FingerID, AndroidFinger> _androidFingers;
+#endif
+
     std::mutex _eventMutex;
     static int eventFilter(void *userdata, SDL_Event *event);
 

@@ -85,6 +85,7 @@ protected:
 
 private:
     void connectSignals();
+    void zoomAt(float zoomFactor, int anchorX, int anchorY);
     /// Calculate srcRect and dstRect from size, autoSize, zoom and pan.
     /// Calling while .width or .height of size or autoSize is <1 is undefined.
     void calculateSrcAndDst(int offX, int offY, bool clip, float& baseScale, SDL_Rect& srcRect,

@@ -67,6 +67,9 @@ private:
 
     std::string _atUri, _atSlot, _atPassword;
     bool _apConnectPending = false;
+    bool _apReconnectRequested = false;
+    bool _apWaitForPackLoad = false;
+    bool _showPackPickerOnStart = false;
     std::string _apHostFromArgs, _apSlotFromArgs;
 
     bool loadTracker(const fs::path& pack, const std::string& variant, bool loadAutosave=true);

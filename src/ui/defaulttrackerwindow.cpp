@@ -8,44 +8,62 @@ namespace Ui {
 DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon, const Position& pos, const Size& size, const WindowConfig& config)
     : TrackerWindow(title, icon, pos, size, config)
 {
-    auto hbox = new HBox(0,0,_size.width,32);
-    hbox->setBackground({0,0,0,255});
-    hbox->setPadding(2);
-    hbox->setSpacing(2);
+    const auto ui = getNativeUiMetrics();
+    auto hbox = new HBox(0,0,_size.width,ui.toolbarHeight);
+    hbox->setBackground({18,18,18,255});
+    hbox->setPadding(ui.toolbarPadding);
+    hbox->setSpacing(ui.toolbarSpacing);
     hbox->setGrow(1,1);
     _menu = hbox;
     addChild(_menu);
     
-    _btnLoad = new ImageButton(0,0,32-4,32-4, asset("load.png"));
+    _btnLoad = new ImageButton(0,0,ui.touchTarget,ui.touchTarget, asset("load.png"));
     _btnLoad->setDarkenGreyscale(false);
     hbox->addChild(_btnLoad);
     _btnLoad->onClick += { this, [this](void*, int, int, int) {
         onMenuPressed.emit(this, MENU_LOAD, 0);
     }};
+
+#ifdef __ANDROID__
+    _btnImportPack = new Label(0,0,ui.touchTarget,ui.touchTarget,_font,"ZIP+");
+    _btnImportPack->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
+    _btnImportPack->setBackground({255,255,255,22});
+    _btnImportPack->setCornerRadius(ui.toolbarCornerRadius);
+    hbox->addChild(_btnImportPack);
+    _btnImportPack->onClick += { this, [this](void*, int, int, int) {
+        onMenuPressed.emit(this, MENU_IMPORT_PACK, 0);
+    }};
+    _btnImportPack->onMouseEnter += {this, [this](void*, int, int, unsigned) {
+        setTooltip("Import Tracker ZIP");
+    }};
+    _btnImportPack->onMouseLeave += {this, [this](void*) {
+        setTooltip("");
+    }};
+#endif
     
-    _btnReload = new ImageButton(0,0,32-4,32-4, asset("reload.png"));
+    _btnReload = new ImageButton(0,0,ui.touchTarget,ui.touchTarget, asset("reload.png"));
     _btnReload->setVisible(false);
     hbox->addChild(_btnReload);
     _btnReload->onClick += { this, [this](void*, int, int, int) {
         onMenuPressed.emit(this, MENU_RELOAD, 0);
     }};
     
-    _btnImport = new ImageButton(0,0,32-4,32-4, asset("import.png"));
+    _btnImport = new ImageButton(0,0,ui.touchTarget,ui.touchTarget, asset("import.png"));
     _btnImport->setVisible(false);
     hbox->addChild(_btnImport);
     _btnImport->onClick += { this, [this](void*, int, int, int) {
         onMenuPressed.emit(this, MENU_LOAD_STATE, 0);
     }};
 
-    _btnExport = new ImageButton(0,0,32-4,32-4, asset("export.png"));
+    _btnExport = new ImageButton(0,0,ui.touchTarget,ui.touchTarget, asset("export.png"));
     _btnExport->setVisible(false);
     hbox->addChild(_btnExport);
     _btnExport->onClick += { this, [this](void*, int, int, int) {
         onMenuPressed.emit(this, MENU_SAVE_STATE, 0);
     }};
 
-#ifndef __EMSCRIPTEN__ // no multi-window support (yet)
-    _btnBroadcast = new ImageButton(0,0,32-4,32-4, asset("broadcast.png"));
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) // no multi-window support
+    _btnBroadcast = new ImageButton(0,0,ui.touchTarget,ui.touchTarget, asset("broadcast.png"));
     _btnBroadcast->setVisible(false);
     hbox->addChild(_btnBroadcast);
     _btnBroadcast->onClick += { this, [this](void*, int, int, int) {
@@ -54,7 +72,7 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
 #endif
 
     if (config.showAlwaysOnTopButton()) {
-        _btnAlwaysOnTop = new ImageButton(0,0,32-4,32-4, asset("always_on_top.png"));
+        _btnAlwaysOnTop = new ImageButton(0,0,ui.touchTarget,ui.touchTarget, asset("always_on_top.png"));
         hbox->addChild(_btnAlwaysOnTop);
         _btnAlwaysOnTop->onClick += { this, [this](void *s, int, int, int) {
             ImageButton* btn = (ImageButton*)s;
@@ -63,25 +81,40 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
         }};
     }
     
-    _btnPackSettings = new ImageButton(32-4,0,32-4,32-4, asset("settings.png"));
+#ifndef __ANDROID__
+    _btnPackSettings = new ImageButton(ui.touchTarget,0,ui.touchTarget,ui.touchTarget, asset("settings.png"));
     _btnPackSettings->setVisible(false);
     hbox->addChild(_btnPackSettings);
     _btnPackSettings->onClick += { this, [this](void*, int, int, int) {
         onMenuPressed.emit(this, MENU_PACK_SETTINGS, 0);
     }};
+#endif
 
-    _hboxAutoTrackers = new HBox(0,0,0,32-4);
-    _hboxAutoTrackers->setPadding(4);
-    _hboxAutoTrackers->setSpacing(6);
+    _hboxAutoTrackers = new HBox(0,0,0,ui.touchTarget);
+    _hboxAutoTrackers->setPadding(0);
+    _hboxAutoTrackers->setSpacing(ui.toolbarSpacing);
     hbox->addChild(_hboxAutoTrackers);
 
+#ifdef __ANDROID__
+    auto tooltipFont = _fontStore->getFont(DEFAULT_FONT_NAME, ui.tooltipFontSize);
+    _lblTooltip = new Label(ui.overlayMargin,
+        ui.toolbarHeight + ui.overlayMargin,
+        std::max(1, _size.width - 2 * ui.overlayMargin),
+        ui.tooltipHeight, tooltipFont, "");
+    _lblTooltip->setBackground({24,24,24,235});
+    _lblTooltip->setCornerRadius(ui.overlayMargin);
+    _lblTooltip->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
+    _lblTooltip->setVisible(false);
+    addChild(_lblTooltip);
+#else
     _lblTooltip = new Label(0,0,0,0,_font,"");
-    _lblTooltip->setHeight(32-4);
+    _lblTooltip->setHeight(ui.touchTarget);
     _lblTooltip->setGrow(1,1);
     _lblTooltip->setTextAlignment(Label::HAlign::RIGHT, Label::VAlign::MIDDLE);
     hbox->addChild(_lblTooltip);
+#endif
 
-    _lblMessage = new Label(0,36,_size.width,0, _font, "");
+    _lblMessage = new Label(0,ui.toolbarHeight + ui.toolbarSpacing,_size.width,0, _font, "");
     _lblMessage->setVisible(false);
     _lblMessage->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::TOP);
     addChild(_lblMessage);
@@ -93,8 +126,13 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
     }
 
     _loadPackWidget = new LoadPackWidget(0,0,0,0,_fontStore);
+#ifdef __ANDROID__
+    _loadPackWidget->setPosition({0,ui.toolbarHeight});
+    _loadPackWidget->setSize({_size.width,std::max(1,_size.height-ui.toolbarHeight)});
+#else
     _loadPackWidget->setPosition({0,0});
     _loadPackWidget->setSize(_size);
+#endif
     _loadPackWidget->setBackground({0,0,0});
     _loadPackWidget->setVisible(false);
     addChild(_loadPackWidget);
@@ -113,31 +151,47 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
     }) {
         if (!pair.first) continue;
         pair.first->setDarkenGreyscale(false);
+#ifdef __ANDROID__
+        pair.first->setEnabled(true);
+        pair.first->setQuality(2);
+        pair.first->setContentPadding(std::max(0,
+            (ui.touchTarget - ui.toolbarIconSize) / 2));
+        pair.first->setCornerRadius(ui.toolbarCornerRadius);
+        pair.first->setBackground({255,255,255,22});
+#else
         pair.first->setEnabled(false); // make greyscale
+#endif
         const char* text = pair.second; // pointer to program memory
         pair.first->onMouseEnter += {this, [this,text](void *s, int, int, unsigned)
         {
             ImageButton* btn = (ImageButton*)s;
             btn->setEnabled(true); // disable greyscale
-            _lblTooltip->setText(text);
+            setTooltip(text);
         }};
         pair.first->onMouseLeave += {this, [this](void *s)
         {
             ImageButton* btn = (ImageButton*)s;
             btn->setEnabled(false); // enable greyscale
-            _lblTooltip->setText("");
+            setTooltip("");
         }};
     }
 
     if (_btnAlwaysOnTop) {
         _btnAlwaysOnTop->setDarkenGreyscale(false);
+#ifdef __ANDROID__
+        _btnAlwaysOnTop->setQuality(2);
+        _btnAlwaysOnTop->setContentPadding(std::max(0,
+            (ui.touchTarget - ui.toolbarIconSize) / 2));
+        _btnAlwaysOnTop->setCornerRadius(ui.toolbarCornerRadius);
+        _btnAlwaysOnTop->setBackground({255,255,255,22});
+#endif
         _btnAlwaysOnTop->onMouseEnter += {this, [this](void*, int, int, unsigned)
         {
-            _lblTooltip->setText("Toggle Always On Top");
+            setTooltip("Toggle Always On Top");
         }};
         _btnAlwaysOnTop->onMouseLeave += {this, [this](void*)
         {
-            _lblTooltip->setText("");
+            setTooltip("");
         }};
     }
 }
@@ -146,6 +200,7 @@ DefaultTrackerWindow::~DefaultTrackerWindow()
 {
     // TODO: make sure widgets are deleted in container's destructor or delete here
     _btnLoad = nullptr;
+    _btnImportPack = nullptr;
     _btnReload = nullptr;
     _btnBroadcast = nullptr;
     _btnAlwaysOnTop = nullptr;
@@ -189,17 +244,17 @@ void DefaultTrackerWindow::setTracker(Tracker* tracker, const std::string& layou
                 auto& item = tracker->getItemById(itemid);
                 item.onChange -= this;
             }
-            if (itemid.empty()) _lblTooltip->setText("");
+            if (itemid.empty()) setTooltip("");
             else {
                 auto& item = tracker->getItemById(itemid);
                 const auto& text = (item.getBaseItem().empty() || item.getState()) ?
                     item.getCurrentName() : tracker->getItemByCode(item.getBaseItem()).getCurrentName();
-                _lblTooltip->setText(text);
+                setTooltip(text);
                 item.onChange += {this, [this, tracker, itemid](void*) {
                     const auto& item = tracker->getItemById(itemid);
                     const auto& text = (item.getBaseItem().empty() || item.getState()) ?
                         item.getCurrentName() : tracker->getItemByCode(item.getBaseItem()).getCurrentName();
-                    _lblTooltip->setText(text);
+                    setTooltip(text);
                 }};
             }
             _lastHoverItem = itemid;
@@ -233,8 +288,24 @@ void DefaultTrackerWindow::hideMessage()
     _lblMessage->setVisible(false);
 }
 
+void DefaultTrackerWindow::setTooltip(const std::string& text)
+{
+    _lblTooltip->setText(text);
+#ifdef __ANDROID__
+    _lblTooltip->setVisible(!text.empty());
+    if (!text.empty()) {
+        _tooltipShownAt = getTicks();
+        raiseChild(_lblTooltip);
+    }
+#endif
+}
+
 void DefaultTrackerWindow::render(Renderer renderer, int offX, int offY)
 {
+#ifdef __ANDROID__
+    if (_lblTooltip->getVisible() && elapsed(_tooltipShownAt, 3000))
+        _lblTooltip->setVisible(false);
+#endif
     if (_view) {
         float oldAspectRatio = _aspectRatio;
         _aspectRatio = (float)getWidth() / (float)getHeight();
@@ -247,13 +318,14 @@ void DefaultTrackerWindow::render(Renderer renderer, int offX, int offY)
 
 void DefaultTrackerWindow::setAutoTrackerState(int index, AutoTracker::State state, const std::string& name, const std::string& subname)
 {
+    const auto ui = getNativeUiMetrics();
     if (index<0) {
         // clear all labels
         for (size_t i=0; i<_lblsAutoTrackers.size(); i++) {
             _autoTrackerStates[i] = state;
             auto lbl = _lblsAutoTrackers[i];
             lbl->setText(name);
-            lbl->setWidth(lbl->getAutoWidth());
+            lbl->setWidth(std::max(lbl->getAutoWidth(), ui.touchTarget));
         }
         if (!_lblsAutoTrackers.empty()) {
             _hboxAutoTrackers->relayout();
@@ -268,7 +340,7 @@ void DefaultTrackerWindow::setAutoTrackerState(int index, AutoTracker::State sta
         lbl = _lblsAutoTrackers[index];
         auto oldWidth = lbl->getWidth();
         lbl->setText(name);
-        lbl->setWidth(lbl->getAutoWidth());
+        lbl->setWidth(std::max(lbl->getAutoWidth(), ui.touchTarget));
         if (lbl->getWidth() != oldWidth) {
             _hboxAutoTrackers->relayout();
             auto menu = dynamic_cast<HBox*>(_menu);
@@ -279,9 +351,13 @@ void DefaultTrackerWindow::setAutoTrackerState(int index, AutoTracker::State sta
         _autoTrackerSubNames[index] = subname;
     } else {
         printf("adding label #%d \"%s\"\n", index, name.c_str());
-        lbl = new Label(0,0,0,32-4,_font, name);
-        lbl->setWidth(lbl->getAutoWidth());
+        lbl = new Label(0,0,0,ui.touchTarget,_font, name);
+        lbl->setWidth(std::max(lbl->getAutoWidth(), ui.touchTarget));
         lbl->setTextColor({0,0,0});
+#ifdef __ANDROID__
+        lbl->setBackground({255,255,255,22});
+        lbl->setCornerRadius(ui.touchTarget / 2);
+#endif
         lbl->onClick += {this, [this,index](void*, int, int, int button) {
             if (button == BUTTON_RIGHT) {
                 onMenuPressed.emit(this, MENU_CYCLE_AUTOTRACKER, index);
@@ -304,12 +380,12 @@ void DefaultTrackerWindow::setAutoTrackerState(int index, AutoTracker::State sta
                     name = _autoTrackerSubNames[index];
             }
             if (text) {
-                _lblTooltip->setText(name + ": " + text);
+                setTooltip(name + ": " + text);
             }
         }};
         lbl->onMouseLeave += {this, [this](void*)
         {
-            _lblTooltip->setText("");
+            setTooltip("");
         }};
         _lblsAutoTrackers.push_back(lbl);
         _autoTrackerStates.push_back(state);
@@ -344,7 +420,17 @@ void DefaultTrackerWindow::setSize(Size size)
 {
     TrackerWindow::setSize(size);
     _lblMessage->setWidth(size.width);
+#ifdef __ANDROID__
+    const auto ui = getNativeUiMetrics();
+    _lblTooltip->setPosition({ui.overlayMargin, ui.toolbarHeight + ui.overlayMargin});
+    _lblTooltip->setSize({std::max(1, size.width - 2 * ui.overlayMargin), ui.tooltipHeight});
+#endif
+#ifdef __ANDROID__
+    _loadPackWidget->setPosition({0,ui.toolbarHeight});
+    _loadPackWidget->setSize({size.width,std::max(1,size.height-ui.toolbarHeight)});
+#else
     _loadPackWidget->setSize(size);
+#endif
     if (_vboxProgress) {
         _vboxProgress->setPosition({
             (_size.width - _vboxProgress->getWidth())/2,
@@ -362,6 +448,7 @@ void DefaultTrackerWindow::showOpen()
 {
     _loadPackWidget->update();
     _loadPackWidget->setVisible(true);
+    raiseChild(_loadPackWidget);
 }
 void DefaultTrackerWindow::hideOpen()
 {

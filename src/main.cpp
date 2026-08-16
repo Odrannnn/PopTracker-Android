@@ -49,6 +49,7 @@ int main(int argc, char** argv)
     bool listInstallable = false;
     const char* installPack = nullptr;
     const char* loadPack = nullptr;
+    const char* loadGame = nullptr;
     const char* packPath = nullptr;
     const char* packVersion = nullptr;
     const char* apHost = nullptr;
@@ -97,6 +98,14 @@ int main(int argc, char** argv)
                 break;
             }
             loadPack = argv[2];
+            argv++;
+            argc--;
+        } else if (strcasecmp("--load-game", argv[1]) == 0) {
+            if (argc <= 2) {
+                badArg = true;
+                break;
+            }
+            loadGame = argv[2];
             argv++;
             argc--;
         } else if (strcasecmp("--pack-version", argv[1]) == 0) {
@@ -155,7 +164,9 @@ int main(int argc, char** argv)
         argc--;
     }
 
-    if ((packPath && cli) || (packPath && loadPack) || (cli && loadPack)) badArg = true;
+    if ((packPath && cli) || (packPath && loadPack) || (packPath && loadGame)
+            || (cli && loadPack) || (cli && loadGame) || (loadPack && loadGame))
+        badArg = true;
 
 #if defined WIN32 || defined _WIN32
     // enable stdout on windows
@@ -190,6 +201,7 @@ int main(int argc, char** argv)
                "    --list-installed: list only installed packs\n"
                "    --install-pack <uid>: download and install pack with uid from repositories\n"
                "    --load-pack <uid>[:<version>]: load this pack on startup\n"
+               "    --load-game <game>: load a unique installed pack matching this game\n"
                "        Action args: --pack-variant, --pack-version\n"
                "\n"
                "  Action args:\n"
@@ -215,8 +227,10 @@ int main(int argc, char** argv)
         args["pack"] = { {"path", localToUTF8(packPath)} };
     } else if (loadPack) {
         args["pack"] = { {"uid", loadPack} };
+    } else if (loadGame) {
+        args["pack"] = { {"game", loadGame} };
     }
-    if ((packPath || loadPack) && packVariant) {
+    if ((packPath || loadPack || loadGame) && packVariant) {
         args["pack"]["variant"] = packVariant;
     }
     if (loadPack && packVersion) {

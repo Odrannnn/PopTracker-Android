@@ -1,6 +1,7 @@
 #include "label.h"
 #include <string.h>
 #include "textutil.h"
+#include "drawhelper.h"
 
 
 namespace Ui {
@@ -22,10 +23,8 @@ Label::~Label()
 void Label::render(Renderer renderer, int offX, int offY)
 {
     if (_backgroundColor.a > 0) {
-        const auto& c = _backgroundColor;
-        SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a);
         SDL_Rect r = { offX+_pos.left, offY+_pos.top, _size.width, _size.height };
-        SDL_RenderFillRect(renderer, &r);
+        fillRoundedRect(renderer, r, _cornerRadius, _backgroundColor);
     }
     if (!_tex && !_text.empty() && _font) {
         SDL_Color color = {_textColor.r, _textColor.g, _textColor.b, _textColor.a};

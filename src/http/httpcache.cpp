@@ -46,7 +46,9 @@ HTTPCache::HTTPCache(asio::io_service *asio, fs::path cacheFile, fs::path cacheD
     }
     // remove cached files where JSON says they are older than 3 months
     // and remove all JSON entries that have no matching file
+#if !defined(__ANDROID__)
     static_assert(sizeof(time_t) > 4, "This platform wouldn't work past 2038");
+#endif
     const auto deleteCachedBefore = time(nullptr) - 3 * 30 * 24 * 60 * 60;
     std::unordered_set<std::string> keptFiles;
     for (auto it = _cache.begin(); it != _cache.end();) {

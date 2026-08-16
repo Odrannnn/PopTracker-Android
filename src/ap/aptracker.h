@@ -39,8 +39,10 @@ public:
         if (stat(uuidFilename.c_str(), &st) == 0)
 #endif
         {
-            static_assert(sizeof(st.st_mtime) == 8 && sizeof(now) == 8);
-            newUuid = (now - st.st_mtime) > 3600;
+            // time_t and stat timestamps are 32-bit on some Android ABIs.
+            // Widen both values before comparing so this works on 32- and
+            // 64-bit platforms without changing the UUID expiry behavior.
+            newUuid = (static_cast<int64_t>(now) - static_cast<int64_t>(st.st_mtime)) > 3600;
         }
         else
             newUuid = true;

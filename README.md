@@ -66,6 +66,10 @@ Gentoo users can install [`games-util/poptracker`](https://codeberg.org/Felicitu
 
 See [BUILD.md](BUILD.md).
 
+### Android port
+
+The Android/NDK port keeps the native Lua pack engine and supports importing tracker packs as ZIP files through Android's document picker. See [ANDROID.md](ANDROID.md) for its current status, build requirements and device verification checklist.
+
 ## Supported/tested packs
 
 Join the [Community Discord](https://discord.com/invite/gwThqMCPgK) to find pack

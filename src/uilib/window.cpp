@@ -28,6 +28,17 @@ Window::Window(const char *title, SDL_Surface* icon, const Position& pos, const 
         fprintf(stderr, "Error creating window: %s\n", SDL_GetError());
         return;
     }
+
+#ifdef __ANDROID__
+    // Android owns the native window size. SDL replaces the requested desktop
+    // dimensions with the Surface dimensions during SDL_CreateWindow, so keep
+    // PopTracker's root layout in sync with that real fullscreen size.
+    int surfaceWidth = 0;
+    int surfaceHeight = 0;
+    SDL_GetWindowSize(_win, &surfaceWidth, &surfaceHeight);
+    if (surfaceWidth > 0 && surfaceHeight > 0)
+        _size = {surfaceWidth, surfaceHeight};
+#endif
     
     if (icon) setIcon(icon);
     
@@ -53,7 +64,7 @@ Window::Window(const char *title, SDL_Surface* icon, const Position& pos, const 
     
     printf("Loading font ...\n");
     _fontStore = new FontStore();
-    _font = _fontStore->getFont(DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE);
+    _font = _fontStore->getFont(DEFAULT_FONT_NAME, getNativeUiMetrics().fontSize);
 
     onMouseMove += {this, [this](void*, int x, int y, unsigned) {
         _lastMousePos = {x, y};
@@ -158,7 +169,18 @@ void Window::setTitle(const std::string& title)
 
 void Window::resize(Size size)
 {
+#ifdef __ANDROID__
+    // SDL_SetWindowSize only changes SDL's viewport on Android; it cannot
+    // resize the Activity surface. That mismatch leaves rendering confined to
+    // a small bottom-left rectangle while input still spans the full screen.
+    int surfaceWidth = 0;
+    int surfaceHeight = 0;
+    SDL_GetWindowSize(_win, &surfaceWidth, &surfaceHeight);
+    if (surfaceWidth > 0 && surfaceHeight > 0)
+        size = {surfaceWidth, surfaceHeight};
+#else
     SDL_SetWindowSize(_win, size.width, size.height);
+#endif
     setSize(size);
 }
 
@@ -199,6 +221,7 @@ void Window::setPosition(const Position& pos)
 void Window::setMinSize(Size size)
 {
     Container::setMinSize(size);
+#ifndef __ANDROID__
     // limit min window width/height to of 5/6 of the screen min. dimension
     int w = 720;
     SDL_DisplayMode dm;
@@ -206,6 +229,7 @@ void Window::setMinSize(Size size)
         w = std::min(dm.w, dm.h) * 5 / 6;
     size = size && Size{w,w};
     SDL_SetWindowMinimumSize(_win, size.width, size.height);
+#endif
 }
 
 int Window::getDisplay() const

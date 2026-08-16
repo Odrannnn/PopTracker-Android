@@ -9,6 +9,7 @@
 #include "../uilib/label.h"
 #include "../uilib/fontstore.h"
 #include "../core/signal.h"
+#include "../core/pack.h"
 #include <SDL2/SDL_ttf.h>
 
 #include "../core/fs.h"
@@ -32,8 +33,15 @@ protected:
     FONT _smallFont;
     
     ScrollVBox *_packs;
-    VBox *_variants;
+    ScrollVBox *_variants;
+#ifdef __ANDROID__
+    HBox *_mobileHeader = nullptr;
+    Label *_mobileBack = nullptr;
+    Label *_mobileTitle = nullptr;
+    Label *_mobileClose = nullptr;
+#else
     HBox *_main;
+#endif
     Label *_curPackLabel = nullptr;
     Label *_curVariantLabel = nullptr;
     Label *_curPackHover = nullptr;
@@ -45,6 +53,12 @@ protected:
     static constexpr Color PACK_BG_ACTIVE_HOVER = {64, 160, 64};
     static constexpr Color VARIANT_BG_DEFAULT = {64, 64, 64};
     static constexpr Color VARIANT_BG_HOVER = {96, 96, 96};
+
+#ifdef __ANDROID__
+    void showPackList();
+    void showVariants(const Pack::Info& pack);
+    void layoutMobile();
+#endif
 };
 
 } // namespace Ui

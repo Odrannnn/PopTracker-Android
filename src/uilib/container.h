@@ -145,10 +145,20 @@ protected:
     Widget* _hoverChild = nullptr;
     Widget* _pressedChild = nullptr;
 
+    // Specialized containers can map pointer coordinates into a transformed
+    // child coordinate space, or consume an interaction before it reaches a
+    // child. The default container remains a transparent event router.
+    virtual bool prepareMouseDown(int&, int&, int) { return true; }
+    virtual bool prepareClick(int&, int&, int) { return true; }
+    virtual bool prepareMouseMove(int&, int&, unsigned) { return true; }
+    virtual bool preparePinch(int&, int&, float) { return true; }
+
     explicit Container(const int x=0, const int y=0, const int w=0, const int h=0)
         : Widget(x,y,w,h)
     {
-        onMouseDown += { this, [this](void*, const int x, const int y, const int button) {
+        onMouseDown += { this, [this](void*, int x, int y, const int button) {
+            if (!prepareMouseDown(x, y, button))
+                return;
             for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
                 const auto child = *childIt;
                 if (child->getVisible() && child->isHit(x, y)) {
@@ -158,7 +168,9 @@ protected:
                 }
             }
         }};
-        onClick += { this, [this](void*, const int x, const int y, const int button) {
+        onClick += { this, [this](void*, int x, int y, const int button) {
+            if (!prepareClick(x, y, button))
+                return;
             for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
                 const auto child = *childIt;
                 if (child->getVisible() && child->isHit(x, y)) {
@@ -177,7 +189,9 @@ protected:
                 oldPressedChild->onMouseCancel.emit(oldPressedChild);
             }
         }};
-        onMouseMove += { this, [this](void*, const int x, const int y, const unsigned buttons) {
+        onMouseMove += { this, [this](void*, int x, int y, const unsigned buttons) {
+            if (!prepareMouseMove(x, y, buttons))
+                return;
             auto oldHoverChild = _hoverChild;
             bool match = false;
             for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
@@ -221,6 +235,18 @@ protected:
         onScroll += { this, [this](void*, const int x, const int y, const unsigned mod) {
             if (_hoverChild)
                 _hoverChild->onScroll.emit(_hoverChild, x, y, mod);
+        }};
+        onPinch += { this, [this](void*, int x, int y, const float scale) {
+            if (!preparePinch(x, y, scale))
+                return;
+            for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
+                const auto child = *childIt;
+                if (child->getVisible() && child->isHit(x, y)) {
+                    child->onPinch.emit(child,
+                        x - child->getLeft(), y - child->getTop(), scale);
+                    break;
+                }
+            }
         }};
     }
 };

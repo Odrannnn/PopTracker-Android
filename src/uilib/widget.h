@@ -137,6 +137,7 @@ protected:
     Spacing _margin = {0,0,0,0};
     bool _dropShadow = false;
     bool _mouseInteraction = true;
+    int _cornerRadius = 0;
 
 public:
     virtual ~Widget()
@@ -208,6 +209,8 @@ public:
 
     void setDropShaodw(bool dropShadow) { _dropShadow = dropShadow; }
     bool getDropShadow() const { return _dropShadow; }
+    void setCornerRadius(int radius) { _cornerRadius = radius > 0 ? radius : 0; }
+    int getCornerRadius() const { return _cornerRadius; }
 
     virtual bool isHover(Widget* w) const { return (w == this); }
 
@@ -242,6 +245,7 @@ public:
     Signal<> onMouseLeave;
     Signal<> onMouseCancel;
     Signal<int,int,unsigned> onScroll;
+    Signal<int,int,float> onPinch;
     Signal<> onDestroy;
 
 #ifndef NDEBUG

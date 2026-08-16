@@ -6,6 +6,7 @@
 namespace Ui {
 
 const std::string TrackerWindow::MENU_LOAD = "load";
+const std::string TrackerWindow::MENU_IMPORT_PACK = "import-pack";
 const std::string TrackerWindow::MENU_RELOAD = "reload";
 const std::string TrackerWindow::MENU_LOAD_STATE = "load-state";
 const std::string TrackerWindow::MENU_SAVE_STATE = "save-state";

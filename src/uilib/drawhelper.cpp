@@ -2,8 +2,35 @@
 #include "imghelper.h"
 #include "texturemanager.h"
 #include "../core/assets.h"
+#include <algorithm>
+#include <cmath>
 
 namespace Ui {
+
+void fillRoundedRect(Renderer renderer, const SDL_Rect& rect, int radius, Widget::Color color)
+{
+    if (rect.w <= 0 || rect.h <= 0 || color.a == 0)
+        return;
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    radius = std::max(0, std::min(radius, std::min(rect.w, rect.h) / 2));
+    if (radius == 0) {
+        SDL_RenderFillRect(renderer, &rect);
+        return;
+    }
+
+    const SDL_Rect middle = {rect.x, rect.y + radius, rect.w, rect.h - 2 * radius};
+    const SDL_Rect center = {rect.x + radius, rect.y, rect.w - 2 * radius, rect.h};
+    SDL_RenderFillRect(renderer, &middle);
+    SDL_RenderFillRect(renderer, &center);
+    for (int row = 0; row < radius; ++row) {
+        const float dy = radius - row - 0.5f;
+        const int inset = static_cast<int>(radius - std::sqrt(radius * radius - dy * dy) + 0.5f);
+        const SDL_Rect top = {rect.x + inset, rect.y + row, rect.w - 2 * inset, 1};
+        const SDL_Rect bottom = {rect.x + inset, rect.y + rect.h - row - 1, rect.w - 2 * inset, 1};
+        SDL_RenderFillRect(renderer, &top);
+        SDL_RenderFillRect(renderer, &bottom);
+    }
+}
 
 static SDL_Texture* getGlowTexture(Renderer renderer)
 {

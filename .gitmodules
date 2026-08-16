@@ -22,3 +22,12 @@
 [submodule "lib/fmt"]
 	path = lib/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "android/vendor/SDL"]
+	path = android/vendor/SDL
+	url = https://github.com/libsdl-org/SDL.git
+[submodule "android/vendor/SDL_image"]
+	path = android/vendor/SDL_image
+	url = https://github.com/libsdl-org/SDL_image.git
+[submodule "android/vendor/SDL_ttf"]
+	path = android/vendor/SDL_ttf
+	url = https://github.com/libsdl-org/SDL_ttf.git

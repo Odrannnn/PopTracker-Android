@@ -1,4 +1,6 @@
 #include "trackerview.h"
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <fmt/format.h>
@@ -316,12 +318,17 @@ TrackerView::TrackerView(int x, int y, int w, int h, Tracker* tracker, const std
         updateLocations();
         updateMapTooltip(); // TODO: move this into updateLocation(s) and detect if the location is hovered
     }};
+    onMouseCancel += {this, [this](void*) {
+        _workspaceDragCandidate = false;
+        _workspaceDragging = false;
+    }};
     updateLayout(layoutRoot);
     updateState("");
 }
 
 TrackerView::~TrackerView()
 {
+    releaseWorkspaceTexture();
     _tracker->onLayoutChanged -= this;
     _tracker->onStateChanged -= this;
     _tracker->onDisplayChanged -= this;
@@ -368,11 +375,170 @@ void TrackerView::render(Renderer renderer, int offX, int offY)
     if (_mapTooltipDirty) {
         updateMapTooltipNow();
     }
-    // store global coordinates for overlay calculations
-    _absX = offX+_pos.left;
-    _absY = offY+_pos.top;
-    // render children
-    Container::render(renderer, offX, offY);
+    // At 1x, retain the normal direct rendering path. Magnified workspaces are
+    // first rendered at their authored layout size, then a selected source
+    // region is stretched into the TrackerView bounds. This keeps every pack
+    // widget and its hit coordinates in the same logical coordinate system.
+    if (_workspaceZoom <= 1.0f) {
+        _absX = offX+_pos.left;
+        _absY = offY+_pos.top;
+        Container::render(renderer, offX, offY);
+        return;
+    }
+
+    if (_workspaceTextureRenderer != renderer || _workspaceTextureSize != _size) {
+        releaseWorkspaceTexture();
+        _workspaceTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+            SDL_TEXTUREACCESS_TARGET, _size.width, _size.height);
+        if (_workspaceTexture) {
+            SDL_SetTextureBlendMode(_workspaceTexture, SDL_BLENDMODE_NONE);
+            _workspaceTextureRenderer = renderer;
+            _workspaceTextureSize = _size;
+        }
+    }
+    if (!_workspaceTexture) {
+        _workspaceZoom = 1.0f;
+        _workspacePanX = 0.0f;
+        _workspacePanY = 0.0f;
+        _absX = offX+_pos.left;
+        _absY = offY+_pos.top;
+        Container::render(renderer, offX, offY);
+        return;
+    }
+
+    SDL_Texture *oldTarget = SDL_GetRenderTarget(renderer);
+    SDL_Rect oldViewport;
+    SDL_RenderGetViewport(renderer, &oldViewport);
+    float oldScaleX = 1.0f;
+    float oldScaleY = 1.0f;
+    SDL_RenderGetScale(renderer, &oldScaleX, &oldScaleY);
+    const SDL_bool oldClipEnabled = SDL_RenderIsClipEnabled(renderer);
+    SDL_Rect oldClip;
+    SDL_RenderGetClipRect(renderer, &oldClip);
+
+    SDL_SetRenderTarget(renderer, _workspaceTexture);
+    SDL_RenderSetViewport(renderer, nullptr);
+    SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+    SDL_RenderSetClipRect(renderer, nullptr);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+    _absX = 0;
+    _absY = 0;
+    Container::render(renderer, -_pos.left, -_pos.top);
+
+    SDL_SetRenderTarget(renderer, oldTarget);
+    SDL_RenderSetViewport(renderer, &oldViewport);
+    SDL_RenderSetScale(renderer, oldScaleX, oldScaleY);
+    SDL_RenderSetClipRect(renderer, oldClipEnabled ? &oldClip : nullptr);
+
+    const int sourceWidth = std::max(1, static_cast<int>(_size.width / _workspaceZoom + 0.5f));
+    const int sourceHeight = std::max(1, static_cast<int>(_size.height / _workspaceZoom + 0.5f));
+    const SDL_Rect source = {
+        static_cast<int>(_workspacePanX + 0.5f),
+        static_cast<int>(_workspacePanY + 0.5f),
+        std::min(sourceWidth, _size.width),
+        std::min(sourceHeight, _size.height)
+    };
+    const SDL_Rect destination = {
+        offX + _pos.left, offY + _pos.top, _size.width, _size.height
+    };
+    SDL_RenderCopy(renderer, _workspaceTexture, &source, &destination);
+}
+
+void TrackerView::releaseWorkspaceTexture()
+{
+    if (_workspaceTexture)
+        SDL_DestroyTexture(_workspaceTexture);
+    _workspaceTexture = nullptr;
+    _workspaceTextureRenderer = nullptr;
+    _workspaceTextureSize = {0,0};
+}
+
+void TrackerView::clampWorkspacePan()
+{
+    if (_workspaceZoom <= 1.0f) {
+        _workspaceZoom = 1.0f;
+        _workspacePanX = 0.0f;
+        _workspacePanY = 0.0f;
+        return;
+    }
+    const float maxPanX = std::max(0.0f, _size.width - _size.width / _workspaceZoom);
+    const float maxPanY = std::max(0.0f, _size.height - _size.height / _workspaceZoom);
+    _workspacePanX = std::max(0.0f, std::min(maxPanX, _workspacePanX));
+    _workspacePanY = std::max(0.0f, std::min(maxPanY, _workspacePanY));
+}
+
+void TrackerView::transformWorkspacePoint(int& x, int& y) const
+{
+    x = static_cast<int>(_workspacePanX + x / _workspaceZoom);
+    y = static_cast<int>(_workspacePanY + y / _workspaceZoom);
+}
+
+bool TrackerView::prepareMouseDown(int& x, int& y, int button)
+{
+    if (_workspaceZoom > 1.0f && button == MouseButton::BUTTON_LEFT) {
+        _workspaceDragCandidate = true;
+        _workspaceDragging = false;
+        _workspaceDragStartX = x;
+        _workspaceDragStartY = y;
+        _workspaceDragStartPanX = _workspacePanX;
+        _workspaceDragStartPanY = _workspacePanY;
+    }
+    transformWorkspacePoint(x, y);
+    return true;
+}
+
+bool TrackerView::prepareMouseMove(int& x, int& y, unsigned buttons)
+{
+    if (_workspaceDragCandidate && (buttons & SDL_BUTTON_LMASK)) {
+        const int deltaX = x - _workspaceDragStartX;
+        const int deltaY = y - _workspaceDragStartY;
+        if (!_workspaceDragging && (std::abs(deltaX) > 16 || std::abs(deltaY) > 16)) {
+            _workspaceDragging = true;
+            if (_pressedChild) {
+                auto pressed = _pressedChild;
+                _pressedChild = nullptr;
+                pressed->onMouseCancel.emit(pressed);
+            }
+        }
+        if (_workspaceDragging) {
+            _workspacePanX = _workspaceDragStartPanX - deltaX / _workspaceZoom;
+            _workspacePanY = _workspaceDragStartPanY - deltaY / _workspaceZoom;
+            clampWorkspacePan();
+            return false;
+        }
+    }
+    transformWorkspacePoint(x, y);
+    return true;
+}
+
+bool TrackerView::prepareClick(int& x, int& y, int)
+{
+    const bool wasDragging = _workspaceDragging;
+    _workspaceDragCandidate = false;
+    _workspaceDragging = false;
+    if (wasDragging)
+        return false;
+    transformWorkspacePoint(x, y);
+    return true;
+}
+
+bool TrackerView::preparePinch(int& x, int& y, float scale)
+{
+    if (!std::isfinite(scale) || scale <= 0.0f)
+        return false;
+    const float oldZoom = _workspaceZoom;
+    const float logicalX = _workspacePanX + x / oldZoom;
+    const float logicalY = _workspacePanY + y / oldZoom;
+    _workspaceZoom = std::max(1.0f, std::min(6.0f, oldZoom * scale));
+    if (_workspaceZoom < 1.01f)
+        _workspaceZoom = 1.0f;
+    _workspacePanX = logicalX - x / _workspaceZoom;
+    _workspacePanY = logicalY - y / _workspaceZoom;
+    clampWorkspacePan();
+    _workspaceDragCandidate = false;
+    _workspaceDragging = false;
+    return false;
 }
 
 std::list< std::pair<std::string,std::string> > TrackerView::getHints() const

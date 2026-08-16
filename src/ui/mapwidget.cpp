@@ -2,6 +2,7 @@
 #include "../core/util.h" // countOf
 #include "../uilib/drawhelper.h"
 #include <algorithm> // std::max, std::min
+#include <cmath>
 
 
 namespace Ui {
@@ -201,6 +202,10 @@ void MapWidget::connectSignals()
         _dragging = false;
     }};
 
+    this->onMouseCancel += { this, [this](void*) {
+        _dragging = false;
+    }};
+
     this->onClick += { this, [this](void*, int, int, int button) {
         // Middle click resets zoom and pan
         if (button == MouseButton::BUTTON_MIDDLE) {
@@ -217,56 +222,21 @@ void MapWidget::connectSignals()
         if (_size.width < 1 || _size.height < 1 || _autoSize.width < 1 || _autoSize.height < 1)
             return;
 
-        const float zoomFactor = (scrollY > 0) ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
-        float newZoom = _zoom * zoomFactor;
+        const float oldZoom = _zoom;
+        zoomAt((scrollY > 0) ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR,
+            _lastMouseX, _lastMouseY);
 
-        // Clamp to 1.0 - 1000.0
-        if (newZoom < 1.01f) {
-            newZoom = 1.0f;
-        } else if (newZoom > MAX_ZOOM) {
-            newZoom = MAX_ZOOM;
-        }
-
-        // Calculate image screen position (same as in render)
-        float baseScale;
-        SDL_Rect oldSrcRect;
-        SDL_FRect oldDstRect;
-        calculateSrcAndDst(0, 0, false, baseScale, oldSrcRect, oldDstRect);
-        if (zoomFactor > 1.0f && (oldSrcRect.w <= 1 || oldSrcRect.h <= 1))
-            return; // don't zoom in further // TODO: estimate this without calculateSrcAndDst
-        const float oldScale = oldDstRect.w / static_cast<float>(oldSrcRect.w);
-
-        if (newZoom != _zoom) {
-            if (oldScale == 0.0f) {
-                // should never happen, but pan update would be a division by 0
-                _zoom = newZoom;
-            } else {
-                // Calculate mouse position in image coordinates (before zoom change)
-                const float oldMouseImgX = (_lastMouseX - oldDstRect.x) / oldScale + oldSrcRect.x;
-                const float oldMouseImgY = (_lastMouseY - oldDstRect.y) / oldScale + oldSrcRect.y;
-
-                // Apply new zoom
-                _zoom = newZoom;
-
-                // Recalculate effective scale with new zoom
-                SDL_Rect newSrcRect;
-                SDL_FRect newDstRect;
-                calculateSrcAndDst(0, 0, false, baseScale, newSrcRect, newDstRect);
-                const float newScale = newDstRect.w / static_cast<float>(newSrcRect.w);
-
-                // Adjust pan so that the point under the mouse stays fixed
-                const float newMouseImgX = (_lastMouseX - newDstRect.x) / newScale + newSrcRect.x;
-                const float newMouseImgY = (_lastMouseY - newDstRect.y) / newScale + newSrcRect.y;
-                _panX += newMouseImgX - oldMouseImgX;
-                _panY += newMouseImgY - oldMouseImgY;
-            }
-        } else if (scrollY < 0 && _zoom == 1.0f) {
+        if (scrollY < 0 && oldZoom == 1.0f && _zoom == 1.0f) {
             // At minimum zoom, scrolling down pans back to center
             // Use percentage of widget size for consistent feel across different image sizes
             constexpr float PAN_STEP_PERCENT = 0.3f; // 30% of widget size per scroll
             const float screenStep = static_cast<float>(std::min(_size.width, _size.height)) * PAN_STEP_PERCENT;
 
             // Convert screen pixels to image pixels
+            float baseScale;
+            SDL_Rect srcRect;
+            SDL_FRect dstRect;
+            calculateSrcAndDst(0, 0, false, baseScale, srcRect, dstRect);
             const float imageStep = (baseScale > 0) ? screenStep * baseScale : screenStep;
 
             const float dist = std::sqrt(_panX * _panX + _panY * _panY);
@@ -282,6 +252,56 @@ void MapWidget::connectSignals()
             }
         }
     }};
+
+    this->onPinch += { this, [this](void*, const int x, const int y, const float scale) {
+        _dragging = false;
+        zoomAt(scale, x + _pos.left, y + _pos.top);
+    }};
+}
+
+void MapWidget::zoomAt(float zoomFactor, int anchorX, int anchorY)
+{
+    if (_size.width < 1 || _size.height < 1 || _autoSize.width < 1 || _autoSize.height < 1 ||
+            !std::isfinite(zoomFactor) || zoomFactor <= 0.0f)
+        return;
+
+    float newZoom = _zoom * zoomFactor;
+    if (newZoom < 1.01f)
+        newZoom = 1.0f;
+    else if (newZoom > MAX_ZOOM)
+        newZoom = MAX_ZOOM;
+
+    float baseScale;
+    SDL_Rect oldSrcRect;
+    SDL_FRect oldDstRect;
+    calculateSrcAndDst(0, 0, false, baseScale, oldSrcRect, oldDstRect);
+    if (zoomFactor > 1.0f && (oldSrcRect.w <= 1 || oldSrcRect.h <= 1))
+        return;
+
+    const float oldScale = oldDstRect.w / static_cast<float>(oldSrcRect.w);
+    if (newZoom == _zoom)
+        return;
+    if (oldScale == 0.0f) {
+        _zoom = newZoom;
+        return;
+    }
+
+    // Preserve the image point beneath the pinch midpoint (or mouse cursor).
+    const float oldAnchorImgX = (anchorX - oldDstRect.x) / oldScale + oldSrcRect.x;
+    const float oldAnchorImgY = (anchorY - oldDstRect.y) / oldScale + oldSrcRect.y;
+    _zoom = newZoom;
+
+    SDL_Rect newSrcRect;
+    SDL_FRect newDstRect;
+    calculateSrcAndDst(0, 0, false, baseScale, newSrcRect, newDstRect);
+    const float newScale = newDstRect.w / static_cast<float>(newSrcRect.w);
+    if (newScale == 0.0f)
+        return;
+
+    const float newAnchorImgX = (anchorX - newDstRect.x) / newScale + newSrcRect.x;
+    const float newAnchorImgY = (anchorY - newDstRect.y) / newScale + newSrcRect.y;
+    _panX += newAnchorImgX - oldAnchorImgX;
+    _panY += newAnchorImgY - oldAnchorImgY;
 }
 
 void MapWidget::render(Renderer renderer, const int offX, const int offY)

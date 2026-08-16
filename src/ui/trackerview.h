@@ -24,6 +24,7 @@ public:
     virtual void render(Renderer renderer, int offX, int offY) override;
     virtual void setSize(Size size) override;
     virtual void addChild(Widget* child) override;
+    virtual bool isHit(int x, int y) const override { return Widget::isHit(x, y); }
     void relayout();
 
     std::list< std::pair<std::string,std::string> > getHints() const;
@@ -76,6 +77,29 @@ protected:
 
     int _defaultItemQuality = -1;
     int _defaultMapQuality = 2; // default smooth
+
+    /// Android workspace magnification. Unlike MapWidget zoom, this scales
+    /// every pack control, including item grids and map selector tabs.
+    float _workspaceZoom = 1.0f;
+    float _workspacePanX = 0.0f;
+    float _workspacePanY = 0.0f;
+    bool _workspaceDragCandidate = false;
+    bool _workspaceDragging = false;
+    int _workspaceDragStartX = 0;
+    int _workspaceDragStartY = 0;
+    float _workspaceDragStartPanX = 0.0f;
+    float _workspaceDragStartPanY = 0.0f;
+    SDL_Texture *_workspaceTexture = nullptr;
+    SDL_Renderer *_workspaceTextureRenderer = nullptr;
+    Size _workspaceTextureSize;
+
+    bool prepareMouseDown(int& x, int& y, int button) override;
+    bool prepareClick(int& x, int& y, int button) override;
+    bool prepareMouseMove(int& x, int& y, unsigned buttons) override;
+    bool preparePinch(int& x, int& y, float scale) override;
+    void transformWorkspacePoint(int& x, int& y) const;
+    void clampWorkspacePan();
+    void releaseWorkspaceTexture();
 
     void updateLayout(const std::string& layout);
     void updateDisplay(const std::string& check);

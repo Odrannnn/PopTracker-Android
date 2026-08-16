@@ -19,6 +19,11 @@
 #include "uilib/imghelper.h"
 #include "ui/maptooltip.h"
 #include "core/fs.h"
+#include <cctype>
+#include <map>
+#ifdef __ANDROID__
+#include "android_bridge.h"
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
@@ -42,6 +47,38 @@ static char _globalStoreKey = 'k';
 static const uintptr_t globalStoreIndex = (uintptr_t)&_globalStoreKey;
 static char _globalPopKey = 'k';
 static const uintptr_t globalPopIndex = (uintptr_t)&_globalPopKey;
+
+static std::string normalizeGameName(const std::string& value)
+{
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const unsigned char c : value) {
+        if (std::isalnum(c))
+            normalized.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return normalized;
+}
+
+// A game name may match several installed versions of one pack. That is still
+// unambiguous, so choose its newest installed version. Multiple pack UIDs are
+// left for the user to choose in the pack picker.
+static Pack::Info findUniquePackForGame(const std::string& game)
+{
+    const std::string wanted = normalizeGameName(game);
+    if (wanted.empty())
+        return {};
+
+    std::map<std::string, Pack::Info> matchingUids;
+    for (const auto& info : Pack::ListAvailable()) {
+        if (normalizeGameName(info.gameName) == wanted)
+            matchingUids[info.uid] = info;
+    }
+    if (matchingUids.size() != 1)
+        return {};
+
+    auto latest = Pack::Find(matchingUids.begin()->first);
+    return latest.path.empty() ? matchingUids.begin()->second : latest;
+}
 
 int PopTracker::global_index(lua_State *L)
 {
@@ -556,20 +593,35 @@ bool PopTracker::start()
         }
         auto& jPack = _args.contains("pack") ? _args["pack"] : _config["pack"];
         if (jPack.type() == json::value_t::object) {
-            auto path = pathFromUTF8(to_string(jPack["path"],""));
             std::string variant = to_string(jPack["variant"],"");
-            if (!scheduleLoadTracker(path,variant))
-            {
-                printf("Could not load pack \"%s\"... fuzzy matching\n", sanitize_print(path).c_str());
-                // try to fuzzy match by uid and version if path is missing
-                std::string uid = to_string(jPack["uid"],"");
-                std::string version = to_string(jPack["version"],"");
-                Pack::Info info = Pack::Find(uid, version);
-                if (info.path.empty()) info = Pack::Find(uid); // try without version
-                if (!scheduleLoadTracker(info.path, variant)) {
-                    printf("Could not load pack uid \"%s\" (\"%s\")\n", uid.c_str(), sanitize_print(info.path).c_str());
+            const std::string game = to_string(jPack["game"],"");
+            if (!game.empty()) {
+                const auto info = findUniquePackForGame(game);
+                if (!scheduleLoadTracker(info.path,variant)) {
+                    printf("Could not uniquely match an installed pack for game \"%s\"\n",
+                        game.c_str());
+                    _showPackPickerOnStart = true;
+                    _apWaitForPackLoad = _apConnectPending;
                 } else {
-                    printf("found pack \"%s\"\n", sanitize_print(info.path).c_str());
+                    printf("Matched game \"%s\" to pack \"%s\"\n",
+                        game.c_str(), sanitize_print(info.path).c_str());
+                    _apWaitForPackLoad = _apConnectPending;
+                }
+            } else {
+                auto path = pathFromUTF8(to_string(jPack["path"],""));
+                if (!scheduleLoadTracker(path,variant))
+                {
+                    printf("Could not load pack \"%s\"... fuzzy matching\n", sanitize_print(path).c_str());
+                    // try to fuzzy match by uid and version if path is missing
+                    std::string uid = to_string(jPack["uid"],"");
+                    std::string version = to_string(jPack["version"],"");
+                    Pack::Info info = Pack::Find(uid, version);
+                    if (info.path.empty()) info = Pack::Find(uid); // try without version
+                    if (!scheduleLoadTracker(info.path, variant)) {
+                        printf("Could not load pack uid \"%s\" (\"%s\")\n", uid.c_str(), sanitize_print(info.path).c_str());
+                    } else {
+                        printf("found pack \"%s\"\n", sanitize_print(info.path).c_str());
+                    }
                 }
             }
         }
@@ -587,6 +639,8 @@ bool PopTracker::start()
     _win = _ui->createWindow<Ui::DefaultTrackerWindow>("PopTracker", icon, pos, size, windowConfig);
     _win->setAlwaysOnTop(alwaysOnTop);
     SDL_FreeSurface(icon);
+    if (_showPackPickerOnStart)
+        _win->showOpen();
 	
 	// SDL2 default is to disable screensaver, enable it if preferred
     if (_config.value<bool>("enable_screensaver", true))
@@ -614,7 +668,7 @@ bool PopTracker::start()
         if (item == Ui::TrackerWindow::MENU_PACK_SETTINGS)
         {
             if (!_tracker) return;
-#ifndef __EMSCRIPTEN__ // no multi-window support (yet)
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) // no multi-window support
             if (_settings) {
                 _settings->Raise();
             } else {
@@ -633,6 +687,12 @@ bool PopTracker::start()
         if (item == Ui::TrackerWindow::MENU_LOAD)
         {
             _win->showOpen();
+        }
+        if (item == Ui::TrackerWindow::MENU_IMPORT_PACK)
+        {
+#ifdef __ANDROID__
+            AndroidBridge::importTrackerPack();
+#endif
         }
         if (item == Ui::TrackerWindow::MENU_RELOAD)
         {
@@ -947,6 +1007,46 @@ bool PopTracker::start()
 
 bool PopTracker::frame()
 {
+#ifdef __ANDROID__
+    std::string intentHost;
+    std::string intentSlot;
+    std::string intentPassword;
+    std::string intentGame;
+    if (AndroidBridge::takeLaunchRequest(
+            intentHost, intentSlot, intentPassword, intentGame)) {
+        if (!intentGame.empty()) {
+            const std::string wanted = normalizeGameName(intentGame);
+            const bool currentPackMatches = _pack
+                && normalizeGameName(_pack->getGameName()) == wanted;
+            if (!currentPackMatches) {
+                const auto info = findUniquePackForGame(intentGame);
+                if (scheduleLoadTracker(info.path,"")) {
+                    _apWaitForPackLoad = true;
+                    _win->hideOpen();
+                } else {
+                    _apWaitForPackLoad = !intentHost.empty();
+                    _win->showOpen();
+                }
+            } else {
+                _apWaitForPackLoad = false;
+                _win->hideOpen();
+            }
+        } else if (!intentHost.empty()) {
+            _apWaitForPackLoad = false;
+        }
+        if (!intentHost.empty()) {
+            _config["at_uri"] = intentHost;
+            _config["at_slot"] = intentSlot;
+            _atUri = intentHost;
+            _atSlot = intentSlot;
+            _atPassword = intentPassword;
+            _apHostFromArgs = std::move(intentHost);
+            _apSlotFromArgs = std::move(intentSlot);
+            _apConnectPending = true;
+            _apReconnectRequested = true;
+        }
+    }
+#endif
     if (_asio) {
         _asio->poll();
         // when all tasks are done, poll() will stop(). Reset for next request.
@@ -954,17 +1054,21 @@ bool PopTracker::frame()
     }
     if (_scriptHost) {
         _scriptHost->onFrame();
-        if (_apConnectPending && !_apHostFromArgs.empty() && !_apSlotFromArgs.empty()) {
+        if (_apConnectPending && !_apWaitForPackLoad
+                && !_apHostFromArgs.empty() && !_apSlotFromArgs.empty()) {
             _apConnectPending = false;
             auto at = _scriptHost->getAutoTracker();
             if (at) {
                 int i = at->getIndex("AP");
                 if (i >= 0) {
+                    if (_apReconnectRequested)
+                        at->disable(i);
                     at->enable(i, _apHostFromArgs, _apSlotFromArgs, _atPassword);
                     _autoTrackerAllDisabled = false;
                     _autoTrackerDisabled["AP"] = false;
                 }
             }
+            _apReconnectRequested = false;
         }
     }
 
@@ -1017,7 +1121,9 @@ bool PopTracker::frame()
     if (res && !_newPack.empty()) {
         printf("Loading Tracker %s:%s!\n", sanitize_print(_newPack).c_str(),
                 sanitize_print(_newVariant).c_str());
-        if (!loadTracker(_newPack, _newVariant, _newTrackerLoadAutosave)) {
+        const bool waitingForIntentPack = _apWaitForPackLoad;
+        const bool trackerLoaded = loadTracker(_newPack, _newVariant, _newTrackerLoadAutosave);
+        if (!trackerLoaded) {
             fprintf(stderr, "Error loading pack!\n");
 #ifdef DONT_IGNORE_PACK_ERRORS
             Dlg::MsgBox("PopTracker", "Error loading pack!",
@@ -1029,6 +1135,11 @@ bool PopTracker::frame()
         }
         _newPack = "";
         _newVariant = "";
+        if (waitingForIntentPack) {
+            _apWaitForPackLoad = false;
+            if (!trackerLoaded)
+                _win->showOpen();
+        }
     }
 
     // auto-save state

@@ -30,6 +30,7 @@ public:
     
 protected:
     ImageButton *_btnLoad = nullptr;
+    Label *_btnImportPack = nullptr;
     ImageButton *_btnReload = nullptr;
     ImageButton *_btnImport = nullptr;
     ImageButton *_btnExport = nullptr;
@@ -52,10 +53,12 @@ protected:
     std::vector<std::string> _autoTrackerSubNames;
     float _aspectRatio = 1;
     std::string _lastHoverItem;
+    tick_t _tooltipShownAt = 0;
 
     virtual void setTracker(Tracker *tracker, const std::string& layout) override;
 
 private:
+    void setTooltip(const std::string& text);
     void showMessage(const std::string& message, bool error=false);
     void hideMessage();
 };

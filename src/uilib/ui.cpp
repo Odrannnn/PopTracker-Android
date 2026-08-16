@@ -6,6 +6,10 @@
 #include "../core/fileutil.h"
 #include "droptype.h"
 #include "timer.h"
+#include <cstdlib>
+#include <algorithm>
+#include <cmath>
+#include <iterator>
 
 
 #if defined __LINUX__ || defined __FREEBSD__ || defined __OPENBSD__ || defined __NETBSD__
@@ -121,7 +125,8 @@ int Ui::eventFilter(void* userdata, SDL_Event *ev)
 {
     Ui* ui = (Ui*)userdata;
     if (ev->type == SDL_WINDOWEVENT) {
-        if (ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+        if (ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                ev->window.event == SDL_WINDOWEVENT_RESIZED) {
             if (!ui->_eventMutex.try_lock()) return 1; // already handling events, skip resize / push to list instead
             int x = ev->window.data1;
             int y = ev->window.data2;
@@ -214,6 +219,15 @@ bool Ui::render()
                     const int button = ev.button.button;
                     const int x = ev.button.x;
                     const int y = ev.button.y;
+#ifdef __ANDROID__
+                    if (button == SDL_BUTTON_LEFT) {
+                        _androidTouchDownAt = SDL_GetTicks();
+                        _androidTouchWindow = ev.button.windowID;
+                        _androidTouchX = x;
+                        _androidTouchY = y;
+                        _androidTouchMoved = false;
+                    }
+#endif
                     auto winIt = _windows.find(ev.button.windowID);
                     if (winIt != _windows.end()) {
                         winIt->second->onMouseDown.emit(winIt->second, x, y, button);
@@ -222,9 +236,21 @@ bool Ui::render()
                 }
                 case SDL_MOUSEBUTTONUP: {
                     EVENT_LOCK(this);
-                    const int button = ev.button.button;
+                    int button = ev.button.button;
                     const int x = ev.button.x;
                     const int y = ev.button.y;
+#ifdef __ANDROID__
+                    if (button == SDL_BUTTON_LEFT &&
+                            ev.button.windowID == _androidTouchWindow &&
+                            !_androidTouchMoved &&
+                            SDL_GetTicks() - _androidTouchDownAt >= 500) {
+                        // Touchscreens have no secondary mouse button. A long
+                        // press maps to PopTracker's existing right-click path.
+                        button = SDL_BUTTON_RIGHT;
+                    }
+                    _androidTouchDownAt = 0;
+                    _androidTouchWindow = 0;
+#endif
                     auto winIt = _windows.find(ev.button.windowID);
                     if (winIt != _windows.end()) {
                         winIt->second->onClick.emit(winIt->second, x, y, button);
@@ -237,6 +263,12 @@ bool Ui::render()
                     unsigned buttons = ev.motion.state;
                     int x = ev.motion.x;
                     int y = ev.motion.y;
+#ifdef __ANDROID__
+                    if (_androidTouchDownAt && (buttons & SDL_BUTTON_LMASK) &&
+                            (std::abs(x - _androidTouchX) > 16 || std::abs(y - _androidTouchY) > 16)) {
+                        _androidTouchMoved = true;
+                    }
+#endif
                     auto winIt = _windows.find(ev.motion.windowID);
                     if (winIt != _windows.end()) {
                         winIt->second->onMouseMove.emit(winIt->second, x, y, buttons);
@@ -256,6 +288,92 @@ bool Ui::render()
                     EVENT_UNLOCK(this);
                     break;
                 }
+#ifdef __ANDROID__
+                case SDL_FINGERDOWN: {
+                    EVENT_LOCK(this);
+                    _androidFingers[ev.tfinger.fingerId] = {
+                        ev.tfinger.x, ev.tfinger.y, ev.tfinger.windowID
+                    };
+                    if (_androidFingers.size() >= 2) {
+                        // The first touch is also represented as a mouse press
+                        // by SDL. Cancel it as soon as a pinch begins so lifting
+                        // the fingers cannot activate an item underneath them.
+                        _androidTouchMoved = true;
+                        auto winIt = _windows.find(ev.tfinger.windowID);
+                        if (winIt == _windows.end() && !_windows.empty())
+                            winIt = _windows.begin();
+                        if (winIt != _windows.end())
+                            winIt->second->onMouseCancel.emit(winIt->second);
+                    }
+                    EVENT_UNLOCK(this);
+                    break;
+                }
+                case SDL_FINGERMOTION: {
+                    EVENT_LOCK(this);
+                    auto finger = _androidFingers.find(ev.tfinger.fingerId);
+                    if (finger == _androidFingers.end()) {
+                        _androidFingers[ev.tfinger.fingerId] = {
+                            ev.tfinger.x, ev.tfinger.y, ev.tfinger.windowID
+                        };
+                        EVENT_UNLOCK(this);
+                        break;
+                    }
+
+                    auto winIt = _windows.find(ev.tfinger.windowID);
+                    if (winIt == _windows.end() && !_windows.empty())
+                        winIt = _windows.begin();
+                    if (winIt == _windows.end()) {
+                        finger->second.x = ev.tfinger.x;
+                        finger->second.y = ev.tfinger.y;
+                        EVENT_UNLOCK(this);
+                        break;
+                    }
+
+                    float oldDistance = 0.0f;
+                    if (_androidFingers.size() >= 2) {
+                        auto first = _androidFingers.begin();
+                        auto second = std::next(first);
+                        const float dx = (first->second.x - second->second.x) * winIt->second->getWidth();
+                        const float dy = (first->second.y - second->second.y) * winIt->second->getHeight();
+                        oldDistance = std::hypot(dx, dy);
+                    }
+
+                    finger->second.x = ev.tfinger.x;
+                    finger->second.y = ev.tfinger.y;
+                    finger->second.windowID = ev.tfinger.windowID;
+
+                    if (_androidFingers.size() >= 2 && oldDistance >= 8.0f) {
+                        auto first = _androidFingers.begin();
+                        auto second = std::next(first);
+                        const float dx = (first->second.x - second->second.x) * winIt->second->getWidth();
+                        const float dy = (first->second.y - second->second.y) * winIt->second->getHeight();
+                        const float newDistance = std::hypot(dx, dy);
+                        if (newDistance >= 8.0f) {
+                            const float scale = std::max(0.8f,
+                                std::min(1.25f, newDistance / oldDistance));
+                            const int x = static_cast<int>((first->second.x + second->second.x)
+                                * 0.5f * winIt->second->getWidth());
+                            const int y = static_cast<int>((first->second.y + second->second.y)
+                                * 0.5f * winIt->second->getHeight());
+                            _androidTouchMoved = true;
+                            winIt->second->onPinch.emit(winIt->second, x, y, scale);
+                        }
+                    }
+                    EVENT_UNLOCK(this);
+                    break;
+                }
+                case SDL_FINGERUP: {
+                    EVENT_LOCK(this);
+                    _androidFingers.erase(ev.tfinger.fingerId);
+                    EVENT_UNLOCK(this);
+                    break;
+                }
+                case SDL_MULTIGESTURE: {
+                    // Pinch is calculated from the individual finger events
+                    // above so the scale factor remains exact and predictable.
+                    break;
+                }
+#endif
                 case SDL_KEYDOWN: {
                     EVENT_LOCK(this);
                     if (!ev.key.repeat) {
@@ -277,7 +395,8 @@ bool Ui::render()
                     break;
                 }
                 case SDL_WINDOWEVENT: {
-                    if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                    if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                            ev.window.event == SDL_WINDOWEVENT_RESIZED) {
                         EVENT_LOCK(this);
 #if 0
                         // NOTE: SDL should merge resizes, we may still detect and warn if multiple are in the queue
@@ -370,6 +489,12 @@ bool Ui::render()
                     if (ev.drop.file) {
                         EVENT_LOCK(this);
                         auto winit = _windows.find(ev.drop.windowID);
+                        // Android's SDL bridge has no native window to attach
+                        // to a document-picker result, so it sends drop events
+                        // with windowID 0. Route those events to the main
+                        // PopTracker window instead of silently discarding them.
+                        if (winit == _windows.end() && ev.drop.windowID == 0 && !_windows.empty())
+                            winit = _windows.begin();
                         if (winit != _windows.end()) {
                             bool isDir = fs::is_directory(fs::u8path(ev.drop.file));
                             winit->second->onDrop.emit(winit->second, 0, 0,
@@ -385,6 +510,8 @@ bool Ui::render()
                     if (ev.drop.file) {
                         EVENT_LOCK(this);
                         auto winit = _windows.find(ev.drop.windowID);
+                        if (winit == _windows.end() && ev.drop.windowID == 0 && !_windows.empty())
+                            winit = _windows.begin();
                         if (winit != _windows.end()) {
                             winit->second->onDrop.emit(winit->second, 0, 0,
                                     DropType::TEXT,

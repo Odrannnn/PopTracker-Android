@@ -1,6 +1,8 @@
 #include "dlg.h"
 
-#if defined __WIN32__
+#if defined __ANDROID__
+#include "android_bridge.h"
+#elif defined __WIN32__
 #include <cassert>
 #include <cstdint>
 #include <windows.h>
@@ -269,7 +271,9 @@ err:
 
 bool Dlg::InputBox(const std::string& title, const std::string& message, const std::string& dflt, std::string& result, bool password)
 {
-#ifdef __WIN32__
+#ifdef __ANDROID__
+    return AndroidBridge::inputBox(title, message, dflt, result, password);
+#elif defined __WIN32__
     char buf[256]; memset(buf, 0, sizeof(buf));
     memcpy(buf, dflt.c_str(), std::min(dflt.length()+1, sizeof(buf)-1));
     int res = InputBoxU(nullptr, message.c_str(), title.c_str(), buf, 256, password);
@@ -292,7 +296,15 @@ bool Dlg::InputBox(const std::string& title, const std::string& message, const s
 
 Dlg::Result Dlg::MsgBox(const std::string& title, const std::string& message, Dlg::Buttons btns, Dlg::Icon icon, Dlg::Result dflt)
 {
-#ifdef __WIN32__
+#ifdef __ANDROID__
+    return static_cast<Dlg::Result>(AndroidBridge::messageBox(
+        title,
+        message,
+        static_cast<int>(btns),
+        static_cast<int>(icon),
+        static_cast<int>(dflt)
+    ));
+#elif defined __WIN32__
     UINT type = btns == Buttons::OKCancel ? MB_OKCANCEL :
                 btns == Buttons::YesNo ? MB_YESNO :
                 btns == Buttons::YesNoCancel ? MB_YESNOCANCEL : MB_OK;
@@ -349,7 +361,26 @@ Dlg::Result Dlg::MsgBox(const std::string& title, const std::string& message, Dl
 
 bool Dlg::OpenFile(const std::string& title, const fs::path& dflt, const std::list<FileType>& types, fs::path& out, bool multi)
 {
-#ifdef __WIN32__
+#ifdef __ANDROID__
+    (void)title;
+    (void)dflt;
+    if (multi)
+        return false;
+    std::string mimeType = "application/octet-stream";
+    for (const auto& type : types) {
+        for (const auto& pattern : type.patterns) {
+            if (pattern.find(".json") != std::string::npos)
+                mimeType = "application/json";
+            else if (pattern.find(".zip") != std::string::npos)
+                mimeType = "application/zip";
+        }
+    }
+    std::string path;
+    if (!AndroidBridge::openDocument(mimeType, path))
+        return false;
+    out = fs::u8path(path);
+    return true;
+#elif defined __WIN32__
     using namespace std::string_literals;
 
     // TODO: implement multi-select
@@ -435,7 +466,15 @@ bool Dlg::OpenFile(const std::string& title, const fs::path& dflt, const std::li
 
 bool Dlg::SaveFile(const std::string& title, const fs::path& dflt, const std::list<FileType>& types, fs::path& out)
 {
-#ifdef __WIN32__
+#ifdef __ANDROID__
+    // State is auto-saved internally. Export through ACTION_CREATE_DOCUMENT is
+    // intentionally deferred until the native save API can write to a URI.
+    (void)title;
+    (void)dflt;
+    (void)types;
+    (void)out;
+    return false;
+#elif defined __WIN32__
     using namespace std::string_literals;
 
     // NOTE: unicode filename currently not supported since we use fopen (not CreateFileW)
@@ -528,7 +567,7 @@ bool Dlg::hasGUI()
 {
     if (_hasGUISet)
         return _hasGUI;
-#if defined __WIN32__ || defined __APPLE__
+#if defined __ANDROID__ || defined __WIN32__ || defined __APPLE__
     // assume yes for windows and mac
     _hasGUI = true;
 #else
