@@ -1,5 +1,11 @@
 # PopTracker for Android
 
+## ⚠️ Important disclaimer: AI-generated port
+
+> **This Android port was created primarily through AI-generated code and AI-assisted development. It is an unofficial community fork and has not received a complete independent code, security or compatibility audit. Expect bugs, crashes, broken tracker packs and other unexpected behavior. Review the source where appropriate, keep backups of anything important and use the APK at your own risk.**
+>
+> **This disclaimer applies to the Android port and its Android-specific changes. The original [PopTracker project](https://github.com/black-sliver/PopTracker) is a separate upstream project; its maintainers did not create or endorse this port and are not responsible for its behavior or support.**
+
 This is an Android-focused fork of [PopTracker](https://github.com/black-sliver/PopTracker), a universal, scriptable progress tracker commonly used with Archipelago randomizers.
 
 The fork keeps PopTracker's native C++/SDL engine, Lua pack APIs, JSON layouts, images, saves, ZIP reader and Archipelago client. Existing tracker packs therefore run through the same engine instead of being converted to a separate Android format.
