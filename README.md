@@ -1,160 +1,90 @@
-# PopTracker
+# PopTracker for Android
 
-*Powerful open progress tracker* is a project to offer a universal, scriptable
-randomizer tracking solution that it is open source, runs everywhere and
-supports auto-tracking.
+This is an Android-focused fork of [PopTracker](https://github.com/black-sliver/PopTracker), a universal, scriptable progress tracker commonly used with Archipelago randomizers.
 
-## Getting started
+The fork keeps PopTracker's native C++/SDL engine, Lua pack APIs, JSON layouts, images, saves, ZIP reader and Archipelago client. Existing tracker packs therefore run through the same engine instead of being converted to a separate Android format.
 
-This is work in progress. Some pre-existing packs work, some do not.
+## What this fork adds
 
-Download a binary release or build from source.
+- An Android Studio/Gradle project targeting Android 5.0 (API 21) and newer.
+- Direct import of tracker pack ZIP files through Android's document picker. Packs remain zipped and are stored in the app's private storage.
+- A phone- and tablet-friendly toolbar with larger controls, including **Import Tracker ZIP**.
+- Pinch-to-zoom and one-finger panning for maps, map selectors and item grids.
+- A fixed map picker bar that remains accessible while the tracker workspace is zoomed.
+- Touch controls: tap for left-click and hold for 500 ms for right-click.
+- Android-safe layout around display cutouts, status bars and navigation bars.
+- Native Android dialogs for confirmations and Archipelago connection details.
+- Support for being launched by another Android app with a game name and Archipelago connection details.
+- Lifecycle handling for switching away from the app and returning to it.
 
-Drag & drop downloaded packs into the PopTracker window to install them without unpacking.\
-Alternatively copy or unpack tracker packs into one of the search paths
-`EXEDIR/packs` (not on macOS), `HOME/PopTracker/packs`,
-`Documents/PopTracker/packs` or `CWD/packs`.
+## Download and install
 
-Use the Load button in the top left corner to load a pack.
+Download the APK from the [latest GitHub release](https://github.com/Odrannnn/PopTracker-Android/releases/latest).
 
-Do not load untrusted packs until some sort of fuzzing is done.
+The current APK is a universal development build containing ARM and x86 variants, so it is larger than a normal Play Store package. Android may ask you to allow installation from the browser or file manager used to open it. The APK uses a development signing key and is not distributed through Google Play.
 
-Binary releases exist for Windows 64bit, macOS 64bit and Linux x86_64
-(see [Download prebuilt exe or app](#download-prebuilt-exe-app-or-appimage)),\
-should compile on most unix-like OS (see [Building from source](#building-from-source)).
+After installation:
 
-Nix users can install [`poptracker`](https://search.nixos.org/packages?show=poptracker&type=packages&query=poptracker) from nixpkgs.
+1. Open PopTracker.
+2. Tap the ZIP import button in the toolbar.
+3. Choose a trusted tracker pack ZIP without extracting it.
+4. Load the installed pack from the pack picker.
+5. Use the **AP** button to enter the Archipelago server, slot and password when the pack supports auto-tracking.
 
-Raspberry Pis can run the Linux ARM64 builds on the 64bit OS (available for Pi 3 and newer). 32bit OS may still work,
-but you need to build yourself. Only Pi 5 with 64bit OS is tested.
+Tracker packs contain Lua code. Only install packs from sources you trust. ZIP imports are limited to 100 MiB.
 
-[WASM](https://wikipedia.org/wiki/WebAssembly) support still needs a lot of work.
+## Launching from another Android app
 
-Check
-[BUILD.md](BUILD.md),
-[CONTRIBUTING.md](CONTRIBUTING.md),
-[doc/OUTLINE.md](doc/OUTLINE.md) and
-[doc/TODO.md](doc/TODO.md)
-if you want to join in on the development journey.
+Another app can explicitly launch `PopTrackerActivity` and supply these string extras:
 
-Check [doc/PACKS.md](doc/PACKS.md) if you want to write a game pack for this tracker.
+| Extra | Purpose |
+| --- | --- |
+| `game` | Game name used to find and open a matching installed tracker pack. |
+| `ap_host` | Archipelago server address, including a port when required. |
+| `ap_slot` | Player slot name. Defaults to `Player` when omitted. |
+| `ap_password` | Archipelago password. May be omitted or empty. |
 
-Upstream URL is https://github.com/black-sliver/PopTracker/
+Example in Kotlin:
 
-## Screenshot
+```kotlin
+val intent = Intent().apply {
+    setClassName(
+        "io.github.poptracker.android",
+        "io.github.poptracker.android.PopTrackerActivity"
+    )
+    putExtra("game", "A Link to the Past")
+    putExtra("ap_host", "archipelago.gg:38281")
+    putExtra("ap_slot", "Player 1")
+    putExtra("ap_password", "")
+}
+startActivity(intent)
+```
 
-![Screenshot](../screenshots/screenshot.png?raw=true "Screenshot")
+The game match is case-insensitive and ignores punctuation and spaces. If exactly one installed pack UID matches, the newest installed version is opened before connecting. If the match is missing or ambiguous, PopTracker shows the pack picker instead of guessing. The same intent contract works when PopTracker is already running.
 
-## Download prebuilt exe, app or AppImage
+## Current limitations
 
-Head over to [releases](https://github.com/black-sliver/PopTracker/releases)
-and unfold "Assets" of the latest release or pre-release to get a Windows exe or macOS app.
-
-For the AppImage, you still need to install `which` and a dialog provider (`zenity`, `kdialog`, `matedialog`, `qarma`
-or `xdialog`) to run them.
-The AppImage currently requires fuse2. On recent Ubuntu and Debian that can be installed with `apt install libfuse2t64`.
-
-### Third-party packages
-
-Please note that the below packages are not maintained by black-sliver.
-
-Arch users can install [`poptracker`](https://aur.archlinux.org/packages/poptracker) from the [AUR](https://wiki.archlinux.org/title/Arch_User_Repository).
-
-Gentoo users can install [`games-util/poptracker`](https://codeberg.org/FelicitusNeko/ysayle/src/branch/main/games-util/poptracker) from the [Ysayle](https://codeberg.org/FelicitusNeko/ysayle) overlay.
+- Manual state export is not implemented; automatic per-pack saves use app-private storage.
+- Broadcast windows and pack-specific secondary settings windows are not implemented.
+- Desktop self-updates are disabled because Android installs updates as APKs or app bundles.
+- Tracker compatibility still depends on the individual pack and its use of PopTracker APIs.
 
 ## Building from source
 
-See [BUILD.md](BUILD.md).
+Install Android Studio or an Android SDK containing SDK Platform 35, Build Tools 35, NDK `27.3.13750724`, CMake 3.22.1 and JDK 17. Then clone with submodules:
 
-### Android port
+```sh
+git clone --recurse-submodules https://github.com/Odrannnn/PopTracker-Android.git
+cd PopTracker-Android/android
+./gradlew assembleDebug
+```
 
-The Android/NDK port keeps the native Lua pack engine and supports importing tracker packs as ZIP files through Android's document picker. See [ANDROID.md](ANDROID.md) for its current status, build requirements and device verification checklist.
+On Windows, use `.\gradlew.bat assembleDebug`. The APK is written under `android/app/build/outputs/apk/debug/`.
 
-## Supported/tested packs
+See [ANDROID.md](ANDROID.md) for architecture details, storage behavior and the device verification checklist. Upstream desktop build instructions remain in [BUILD.md](BUILD.md).
 
-Join the [Community Discord](https://discord.com/invite/gwThqMCPgK) to find pack
-repositories, follow updates and get support.
+## Upstream and license
 
-## Location Color Key
+This fork is based on [black-sliver/PopTracker](https://github.com/black-sliver/PopTracker) and preserves its history. PopTracker is licensed under the [GNU General Public License v3.0](LICENSE).
 
-| Color  | Meaning                                                                                                                               |
-|--------|---------------------------------------------------------------------------------------------------------------------------------------|
-| Red    | This check is not currently accessible.                                                                                               |
-| Yellow | This check is not logically accessible, but the location can be reached through alternate methods (e.g. glitches, breaking key logic) |
-| Orange | Some (but not all) checks at this location are accessible.                                                                            |
-| Green  | All checks at this location are logically accessible.                                                                                 |
-| Blue   | The check at this location is visible, but you cannot currently access the check.                                                     |
-| Other  | Locations with mixed accessibility checks will have the corresponding colors mixed.                                                   |
-
-Colors can be customized by following instructions on
-[the Color Picker page](https://poptracker.github.io/color-picker.html).
-
-Press Ctrl+P to switch between "mixed" and "split" map location colors.
-
-## Auto-tracking
-
-### SNES Games
-Requires [SNI](https://github.com/alttpo/sni)
-or [QUsb2Snes](https://usb2snes.com) (flash cart, emu, snes mini)
-or [usb2snes](https://github.com/RedGuyyyy/sd2snes/releases) (flash cart only).
-See their respective documentation.
-
-### PC Games
-We do not allow direct access to process memory or sockets from Lua. Instead,
-[UAT](https://github.com/black-sliver/UAT) can be used to receive "variables".
-
-### Archipelago Multiworld
-[Archipelago](https://archipelago.gg) allows connecting to a Multiworld as a
-tracker. Click on the grey "AP" to connect to a server if the pack supports it.
-See [doc/AUTOTRACKING.md](./doc/AUTOTRACKING.md) for more details.
-
-### BizHawk Connector
-Preview, currently only tested with GBA and N64.
-See [doc/AUTOTRACKING.md](./doc/AUTOTRACKING.md#supported-interfaces) for details.
-
-### Other systems
-No work has been done for other systems yet.
-
-## Keyboard Shortcuts
-
-| Hotkey    | Alternative      | Function                                                                                                         |
-|-----------|------------------|------------------------------------------------------------------------------------------------------------------|
-| F1        | n/a              | Show this document.                                                                                              |
-| F2        | n/a              | Open broadcast window.                                                                                           |
-| F5        | Ctrl + R         | Reload: if the pack did not change, loads an empty state (everything unchecked), otherwise same as force-reload. |
-| Ctrl + F5 | Ctrl + Shift + R | Force-reload: reload the pack from disk.                                                                         |
-| F11       | Ctrl + H         | Toggle visibility of cleared and inaccessible map locations.                                                     |
-| Ctrl + P  | n/a              | Toggle between mixed and split colors for map locations.                                                         |
-
-## Version Numbering
-
-* Major update (X.0.0) may break everything
-* Minor update (0.X.0) may change render output (i.e. window captures break)
-* Revisions (0.0.X) should only fix bugs and add non-breaking features
-
-## Plug-Ins
-
-Currently, there is no plug-in interface.
-
-If you want to work towards implementing such a system, please check
-[PLUGIN LICENSE ADDENDUM.md](PLUGIN%20LICENSE%20ADDENDUM.md)
-for licensing considerations.
-
-## User Overrides
-
-Users can override files from packs by creating a folder with the same file
-structure as in the pack, named `.../user-override/<pack_uid>` where `...` is
-any one of `Documents/PopTracker`, `%home%/PopTracker` or `AppPath`.
-
-## Portable Mode
-
-When creating a file called `portable.txt` next to the program (not macOS) or
-next to `poptracker` **inside** the AppBundle (macos-only), the app runs in
-portable mode, which changes the default pack folder to be next to the program
-(not in home folder) and disables asset and pack overrides from home folder
-(only allows overrides from program folder).
-
-## Command Line Arguments
-
-PopTracker supports some command line arguments. Run with `--help` from a terminal
-or see [doc/commandline.txt](doc/commandline.txt).
+For tracker packs and the wider PopTracker community, visit the [PopTracker Discord](https://discord.com/invite/gwThqMCPgK).
