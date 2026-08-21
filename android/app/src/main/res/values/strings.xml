@@ -3,5 +3,5 @@
     <string name="import_tracker_zip">Import tracker ZIP</string>
     <string name="import_failed">Could not import this tracker pack.</string>
     <string name="assets_failed">PopTracker assets could not be prepared.</string>
-    <string name="touch_help">Tap to select; hold for right-click; pinch the tracker to zoom and drag to pan.</string>
+    <string name="touch_help">Tap to select; hold for right-click; pinch to zoom, drag to pan, or tap the zoom indicator to step through useful sizes.</string>
 </resources>

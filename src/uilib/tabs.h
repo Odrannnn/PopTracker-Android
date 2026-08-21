@@ -27,6 +27,7 @@ public:
     virtual bool setActiveTab(const std::string& name);
     virtual bool setActiveTab(int index);
     virtual const std::string& getActiveTabName() const;
+    void setMinimumTouchTarget(int size);
 
     /// reserves memory for the tabs
     void reserve(size_t size);
@@ -42,6 +43,7 @@ protected:
     std::vector<Button*> _buttons;
     FONT _font;
     int _spacing = 0;
+    int _minimumTouchTarget = 0;
     int _tabIndex = 0;
     Widget* _tab = nullptr;
     Button* _tabButton = nullptr;

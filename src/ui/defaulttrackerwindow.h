@@ -4,6 +4,8 @@
 #include "trackerwindow.h"
 #include "loadpackwidget.h"
 #include "../uilib/progressbar.h"
+#include "../uilib/hflexbox.h"
+#include "../uilib/button.h"
 #include <vector>
 
 namespace Ui {
@@ -31,6 +33,11 @@ public:
 protected:
     ImageButton *_btnLoad = nullptr;
     Label *_btnImportPack = nullptr;
+    Label *_btnWorkspaceZoom = nullptr;
+    HFlexBox *_mobileSectionBar = nullptr;
+    std::vector<Button*> _mobileSectionButtons;
+    std::vector<TrackerView::MobileSection> _mobileSections;
+    int _activeMobileSection = -1;
     ImageButton *_btnReload = nullptr;
     ImageButton *_btnImport = nullptr;
     ImageButton *_btnExport = nullptr;
@@ -58,6 +65,10 @@ protected:
     virtual void setTracker(Tracker *tracker, const std::string& layout) override;
 
 private:
+    void rebuildMobileSections(Tracker* tracker, const std::string& layout);
+    void selectMobileSection(size_t index);
+    int updateMobileSectionLayout(Size size);
+    void updateWorkspaceZoomLabel(float zoom);
     void setTooltip(const std::string& text);
     void showMessage(const std::string& message, bool error=false);
     void hideMessage();

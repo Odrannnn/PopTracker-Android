@@ -38,6 +38,7 @@ public final class PopTrackerActivity extends SDLActivity {
     private static final int REQUEST_OPEN_FILE = 7002;
     private static final long MAX_IMPORT_BYTES = 100L * 1024L * 1024L;
     private static final String ASSET_VERSION = "0.35.4";
+    private static final String WORKSPACE_VIEW_PREFERENCES = "workspace_views";
 
     private final Object pickerSerialLock = new Object();
     private final Object pickerLock = new Object();
@@ -155,6 +156,35 @@ public final class PopTrackerActivity extends SDLActivity {
             });
             startActivityForResult(intent, REQUEST_IMPORT_PACK);
         });
+    }
+
+    /** Persists viewer-only state without changing tracker packs or their saves. */
+    public float[] loadWorkspaceViewState(String key) {
+        android.content.SharedPreferences preferences =
+                getSharedPreferences(WORKSPACE_VIEW_PREFERENCES, MODE_PRIVATE);
+        String zoomKey = key + ".zoom";
+        if (!preferences.contains(zoomKey)) {
+            return null;
+        }
+        return new float[]{
+                preferences.getFloat(zoomKey, 1.0f),
+                preferences.getFloat(key + ".pan_x", 0.0f),
+                preferences.getFloat(key + ".pan_y", 0.0f)
+        };
+    }
+
+    public void saveWorkspaceViewState(
+            String key,
+            float zoom,
+            float normalizedPanX,
+            float normalizedPanY
+    ) {
+        getSharedPreferences(WORKSPACE_VIEW_PREFERENCES, MODE_PRIVATE)
+                .edit()
+                .putFloat(key + ".zoom", zoom)
+                .putFloat(key + ".pan_x", normalizedPanX)
+                .putFloat(key + ".pan_y", normalizedPanY)
+                .apply();
     }
 
     @Override

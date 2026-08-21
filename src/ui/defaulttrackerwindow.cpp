@@ -2,6 +2,8 @@
 #include "../uilib/dlg.h"
 #include "../uilib/hbox.h"
 #include "../core/assets.h"
+#include <cmath>
+#include <cstdio>
 
 namespace Ui {
 
@@ -16,6 +18,18 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
     hbox->setGrow(1,1);
     _menu = hbox;
     addChild(_menu);
+
+#ifdef __ANDROID__
+    _mobileSectionBar = new HFlexBox(
+        0, ui.toolbarHeight, _size.width, ui.touchTarget,
+        HFlexBox::HAlign::CENTER
+    );
+    _mobileSectionBar->setPadding(ui.toolbarPadding);
+    _mobileSectionBar->setSpacing(ui.toolbarSpacing);
+    _mobileSectionBar->setBackground({24,24,24,255});
+    _mobileSectionBar->setVisible(false);
+    addChild(_mobileSectionBar);
+#endif
     
     _btnLoad = new ImageButton(0,0,ui.touchTarget,ui.touchTarget, asset("load.png"));
     _btnLoad->setDarkenGreyscale(false);
@@ -37,6 +51,27 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
         setTooltip("Import Tracker ZIP");
     }};
     _btnImportPack->onMouseLeave += {this, [this](void*) {
+        setTooltip("");
+    }};
+
+    _btnWorkspaceZoom = new Label(0,0,ui.touchTarget,ui.touchTarget,_font,"1x");
+    _btnWorkspaceZoom->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
+    _btnWorkspaceZoom->setBackground({255,255,255,22});
+    _btnWorkspaceZoom->setCornerRadius(ui.toolbarCornerRadius);
+    _btnWorkspaceZoom->setVisible(false);
+    hbox->addChild(_btnWorkspaceZoom);
+    _btnWorkspaceZoom->onClick += {this, [this](void*, int, int, int button) {
+        if (!_view)
+            return;
+        if (button == BUTTON_RIGHT)
+            _view->resetWorkspaceView();
+        else if (button == BUTTON_LEFT)
+            _view->cycleWorkspaceZoom();
+    }};
+    _btnWorkspaceZoom->onMouseEnter += {this, [this](void*, int, int, unsigned) {
+        setTooltip("Tap to zoom tracker; hold to fit");
+    }};
+    _btnWorkspaceZoom->onMouseLeave += {this, [this](void*) {
         setTooltip("");
     }};
 #endif
@@ -201,6 +236,10 @@ DefaultTrackerWindow::~DefaultTrackerWindow()
     // TODO: make sure widgets are deleted in container's destructor or delete here
     _btnLoad = nullptr;
     _btnImportPack = nullptr;
+    _btnWorkspaceZoom = nullptr;
+    _mobileSectionBar = nullptr;
+    _mobileSectionButtons.clear();
+    _mobileSections.clear();
     _btnReload = nullptr;
     _btnBroadcast = nullptr;
     _btnAlwaysOnTop = nullptr;
@@ -227,11 +266,29 @@ void DefaultTrackerWindow::setTracker(Tracker* tracker)
 
 void DefaultTrackerWindow::setTracker(Tracker* tracker, const std::string& layout)
 {
-    if (_view && _view->getTracker() == tracker && _view->getLayoutRoot() == layout)
+    if (_view && _view->getTracker() == tracker && _view->getLayoutRoot() == layout) {
+#ifdef __ANDROID__
+        // Packs can register their root layout before layouts referenced by it.
+        // onLayoutChanged calls back into setTracker as each file is loaded, so
+        // refresh the derived mobile navigation even when the selected root did
+        // not change.
+        rebuildMobileSections(tracker, layout);
+#endif
         return;
+    }
 
     TrackerWindow::setTracker(tracker, layout);
+    rebuildMobileSections(tracker, layout);
     if (tracker) {
+#ifdef __ANDROID__
+        if (_btnWorkspaceZoom) {
+            _btnWorkspaceZoom->setVisible(true);
+            _view->onWorkspaceZoomChanged += {this, [this](void*, float zoom) {
+                updateWorkspaceZoomLabel(zoom);
+            }};
+            updateWorkspaceZoomLabel(_view->getWorkspaceZoom());
+        }
+#endif
         hideMessage();
         tracker->onLayoutChanged -= this;
         tracker->onLayoutChanged += {this, [this,tracker](void*, const std::string&) {
@@ -268,8 +325,130 @@ void DefaultTrackerWindow::setTracker(Tracker* tracker, const std::string& layou
         if (_btnReload) _btnReload->setVisible(false);
         if (_btnImport) _btnImport->setVisible(false);
         if (_btnExport) _btnExport->setVisible(false);
+#ifdef __ANDROID__
+        if (_btnWorkspaceZoom) _btnWorkspaceZoom->setVisible(false);
+#endif
     }
     raiseChild(_loadPackWidget);
+}
+
+void DefaultTrackerWindow::rebuildMobileSections(
+    Tracker* tracker, const std::string& layout
+)
+{
+#ifdef __ANDROID__
+    if (!_mobileSectionBar)
+        return;
+    std::string previousTitle;
+    if (_activeMobileSection >= 0 &&
+            static_cast<size_t>(_activeMobileSection) < _mobileSections.size())
+        previousTitle = _mobileSections[_activeMobileSection].title;
+
+    _mobileSectionButtons.clear();
+    _mobileSectionBar->clearChildren();
+    _mobileSections = TrackerView::discoverMobileSections(tracker, layout);
+    _activeMobileSection = -1;
+
+    if (!_view || _mobileSections.size() < 2) {
+        _mobileSectionBar->setVisible(false);
+        if (_view) _view->setMobileSection(nullptr);
+        updateMobileSectionLayout(_size);
+        return;
+    }
+
+    const auto ui = getNativeUiMetrics();
+    _mobileSectionBar->setVisible(true);
+    _mobileSectionBar->setWidth(std::max(1, _size.width));
+    for (size_t index = 0; index < _mobileSections.size(); index++) {
+        const auto& section = _mobileSections[index];
+        auto* button = new Button(0, 0, 0, ui.touchTarget, _font, section.title);
+        button->setSize({
+            std::max(ui.touchTarget, button->getAutoWidth()),
+            ui.touchTarget,
+        });
+        button->setMinimumHitSize({ui.touchTarget, ui.touchTarget});
+        button->setCornerRadius(ui.toolbarCornerRadius);
+        button->setState(Button::State::NORMAL);
+        button->onClick += {this, [this,index](void*, int, int, int button) {
+            if (button == BUTTON_LEFT)
+                selectMobileSection(index);
+        }};
+        _mobileSectionButtons.push_back(button);
+        _mobileSectionBar->addChild(button);
+    }
+
+    size_t selected = 0;
+    if (!previousTitle.empty()) {
+        for (size_t index = 0; index < _mobileSections.size(); index++) {
+            if (_mobileSections[index].title == previousTitle) {
+                selected = index;
+                break;
+            }
+        }
+    }
+    updateMobileSectionLayout(_size);
+    selectMobileSection(selected);
+#else
+    (void)tracker;
+    (void)layout;
+#endif
+}
+
+void DefaultTrackerWindow::selectMobileSection(size_t index)
+{
+#ifdef __ANDROID__
+    if (!_view || index >= _mobileSections.size())
+        return;
+    _activeMobileSection = static_cast<int>(index);
+    for (size_t buttonIndex = 0;
+            buttonIndex < _mobileSectionButtons.size(); buttonIndex++) {
+        _mobileSectionButtons[buttonIndex]->setState(
+            buttonIndex == index ? Button::State::PRESSED : Button::State::NORMAL
+        );
+    }
+    _view->setMobileSection(&_mobileSections[index]);
+#else
+    (void)index;
+#endif
+}
+
+int DefaultTrackerWindow::updateMobileSectionLayout(Size size)
+{
+    const auto ui = getNativeUiMetrics();
+    int contentTop = ui.toolbarHeight;
+#ifdef __ANDROID__
+    if (_mobileSectionBar && _mobileSectionBar->getVisible()) {
+        _mobileSectionBar->setPosition({0, ui.toolbarHeight});
+        _mobileSectionBar->setSize({std::max(1, size.width), ui.touchTarget});
+        contentTop = _mobileSectionBar->getTop() + _mobileSectionBar->getHeight();
+    }
+    if (_view) {
+        _view->setPosition({0, contentTop});
+        _view->setSize({
+            std::max(1, size.width),
+            std::max(1, size.height - contentTop),
+        });
+    }
+#else
+    (void)size;
+#endif
+    return contentTop;
+}
+
+void DefaultTrackerWindow::updateWorkspaceZoomLabel(float zoom)
+{
+#ifdef __ANDROID__
+    if (!_btnWorkspaceZoom)
+        return;
+    char text[12];
+    if (std::abs(zoom - std::round(zoom)) < 0.05f)
+        std::snprintf(text, sizeof(text), "%dx", static_cast<int>(std::round(zoom)));
+    else
+        std::snprintf(text, sizeof(text), "%.1fx", zoom);
+    _btnWorkspaceZoom->setText(text);
+#else
+    (void)zoom;
+#endif
 }
 
 void DefaultTrackerWindow::showMessage(const std::string& message, bool error)
@@ -422,7 +601,8 @@ void DefaultTrackerWindow::setSize(Size size)
     _lblMessage->setWidth(size.width);
 #ifdef __ANDROID__
     const auto ui = getNativeUiMetrics();
-    _lblTooltip->setPosition({ui.overlayMargin, ui.toolbarHeight + ui.overlayMargin});
+    const int contentTop = updateMobileSectionLayout(size);
+    _lblTooltip->setPosition({ui.overlayMargin, contentTop + ui.overlayMargin});
     _lblTooltip->setSize({std::max(1, size.width - 2 * ui.overlayMargin), ui.tooltipHeight});
 #endif
 #ifdef __ANDROID__

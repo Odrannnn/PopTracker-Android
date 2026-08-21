@@ -205,3 +205,18 @@ target_link_libraries(main PRIVATE
     ${LOG_LIBRARY}
     ${Z_LIBRARY}
 )
+
+# The OpenSSL AAR exposes its shared libraries only through Prefab. That makes
+# them available to the native linker, but AGP does not automatically place
+# those Prefab-only runtime files beside libmain.so in the APK. Copy both
+# transitive runtime dependencies into the external-native-build output so
+# mergeDebugNativeLibs/mergeReleaseNativeLibs package them for every ABI.
+add_custom_command(TARGET main POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:openssl::ssl>
+        $<TARGET_FILE_DIR:main>/$<TARGET_FILE_NAME:openssl::ssl>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:openssl::crypto>
+        $<TARGET_FILE_DIR:main>/$<TARGET_FILE_NAME:openssl::crypto>
+    COMMENT "Packaging OpenSSL runtime libraries"
+)

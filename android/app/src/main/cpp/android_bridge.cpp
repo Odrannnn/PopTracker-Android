@@ -195,6 +195,76 @@ bool importTrackerPack()
     return !takeJavaException(scope.env);
 }
 
+bool loadWorkspaceViewState(
+    const std::string& key,
+    float& zoom,
+    float& normalizedPanX,
+    float& normalizedPanY)
+{
+    ActivityScope scope;
+    if (!scope.valid())
+        return false;
+    jmethodID method = scope.env->GetMethodID(
+        scope.type,
+        "loadWorkspaceViewState",
+        "(Ljava/lang/String;)[F"
+    );
+    if (!method || takeJavaException(scope.env))
+        return false;
+
+    jstring jKey = toJava(scope.env, key);
+    auto values = static_cast<jfloatArray>(
+        scope.env->CallObjectMethod(scope.activity, method, jKey)
+    );
+    scope.env->DeleteLocalRef(jKey);
+    if (takeJavaException(scope.env) || !values)
+        return false;
+    if (scope.env->GetArrayLength(values) != 3) {
+        scope.env->DeleteLocalRef(values);
+        return false;
+    }
+
+    jfloat state[3] = {1.0f, 0.0f, 0.0f};
+    scope.env->GetFloatArrayRegion(values, 0, 3, state);
+    scope.env->DeleteLocalRef(values);
+    if (takeJavaException(scope.env))
+        return false;
+    zoom = state[0];
+    normalizedPanX = state[1];
+    normalizedPanY = state[2];
+    return true;
+}
+
+void saveWorkspaceViewState(
+    const std::string& key,
+    float zoom,
+    float normalizedPanX,
+    float normalizedPanY)
+{
+    ActivityScope scope;
+    if (!scope.valid())
+        return;
+    jmethodID method = scope.env->GetMethodID(
+        scope.type,
+        "saveWorkspaceViewState",
+        "(Ljava/lang/String;FFF)V"
+    );
+    if (!method || takeJavaException(scope.env))
+        return;
+
+    jstring jKey = toJava(scope.env, key);
+    scope.env->CallVoidMethod(
+        scope.activity,
+        method,
+        jKey,
+        static_cast<jfloat>(zoom),
+        static_cast<jfloat>(normalizedPanX),
+        static_cast<jfloat>(normalizedPanY)
+    );
+    scope.env->DeleteLocalRef(jKey);
+    takeJavaException(scope.env);
+}
+
 bool takeLaunchRequest(
     std::string& host,
     std::string& slot,

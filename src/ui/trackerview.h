@@ -6,17 +6,26 @@
 #include "../uilib/group.h"
 #include "../uilib/tabs.h"
 #include "../uilib/fontstore.h"
+#include "../uilib/viewporttransform.h"
 #include "mapwidget.h"
 #include "maptooltip.h"
 #include "item.h"
 #include "../core/tracker.h"
 #include <list>
 #include <map>
+#include <vector>
 
 namespace Ui {
 
 class TrackerView : public SimpleContainer {
 public:
+    struct MobileSection {
+        std::string id;
+        std::string title;
+        std::vector<size_t> path;
+        bool fillUndersized = false;
+    };
+
     using FONT = Group::FONT;
     TrackerView(int x, int y, int w, int h, Tracker* tracker, const std::string& layoutRoot, FontStore *fontStore);
     ~TrackerView();
@@ -33,9 +42,17 @@ public:
 
     void setHideClearedLocations(bool hide);
     void setHideUnreachableLocations(bool hide);
+    static std::vector<MobileSection> discoverMobileSections(
+        Tracker* tracker, const std::string& layoutRoot
+    );
+    void setMobileSection(const MobileSection* section);
+    float getWorkspaceZoom() const { return _workspaceViewport.getZoom(); }
+    void cycleWorkspaceZoom();
+    void resetWorkspaceView();
 
     Signal<const std::string&> onItemHover;
     Signal<const std::string&> onItemTooltip;
+    Signal<float> onWorkspaceZoomChanged;
 
     static int CalculateLocationState(Tracker* tracker, const std::string& location);
     static int CalculateLocationState(Tracker* tracker, const std::string& location,
@@ -80,9 +97,7 @@ protected:
 
     /// Android workspace magnification. Unlike MapWidget zoom, this scales
     /// every pack control, including item grids and map selector tabs.
-    float _workspaceZoom = 1.0f;
-    float _workspacePanX = 0.0f;
-    float _workspacePanY = 0.0f;
+    ViewportTransform _workspaceViewport;
     bool _workspaceDragCandidate = false;
     bool _workspaceDragging = false;
     int _workspaceDragStartX = 0;
@@ -92,14 +107,33 @@ protected:
     SDL_Texture *_workspaceTexture = nullptr;
     SDL_Renderer *_workspaceTextureRenderer = nullptr;
     Size _workspaceTextureSize;
+    std::string _workspaceStateKey;
+    bool _workspaceStateDirty = false;
+    bool _suspendWorkspacePersistence = false;
+    tick_t _workspaceStateChangedAt = 0;
+    std::string _mobileSectionId;
+    std::vector<size_t> _mobileSectionPath;
+    Size _mobileSectionContentSize;
+    bool _mobileSectionFillUndersized = false;
+    bool _mobileSectionAutoFitPending = false;
+    bool _workspaceStateRestored = false;
 
     bool prepareMouseDown(int& x, int& y, int button) override;
     bool prepareClick(int& x, int& y, int button) override;
     bool prepareMouseMove(int& x, int& y, unsigned buttons) override;
     bool preparePinch(int& x, int& y, float scale) override;
     void transformWorkspacePoint(int& x, int& y) const;
-    void clampWorkspacePan();
     void releaseWorkspaceTexture();
+    void updateWorkspaceStateKey();
+    void markWorkspaceStateChanged();
+    void saveWorkspaceState();
+    void updateMinimumTouchTargets();
+    void workspaceZoomChanged();
+    float getMobileSectionFillZoom() const;
+    void applyMobileSectionAutoFit();
+    bool canPanWorkspace() const;
+    void clampWorkspacePanToContent();
+    const LayoutNode* resolveMobileSectionNode() const;
 
     void updateLayout(const std::string& layout);
     void updateDisplay(const std::string& check);

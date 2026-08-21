@@ -23,6 +23,19 @@ int messageBox(
 bool openDocument(const std::string& mimeType, std::string& path);
 bool importTrackerPack();
 
+bool loadWorkspaceViewState(
+    const std::string& key,
+    float& zoom,
+    float& normalizedPanX,
+    float& normalizedPanY
+);
+void saveWorkspaceViewState(
+    const std::string& key,
+    float zoom,
+    float normalizedPanX,
+    float normalizedPanY
+);
+
 // Consumes the most recent connection request delivered by an Android intent.
 // This is read from PopTracker's SDL thread so native tracker state remains
 // single-threaded even though onNewIntent runs on Android's UI thread.

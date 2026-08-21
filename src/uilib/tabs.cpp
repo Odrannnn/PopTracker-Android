@@ -42,6 +42,8 @@ void Tabs::addChild(Widget* w)
         _hGrow = w->getHGrow();
     auto* btn = new Button(0,0,0,0,_font,"Tab");
     btn->setSize(btn->getMinSize());
+    if (_minimumTouchTarget > 0)
+        btn->setMinimumHitSize({_minimumTouchTarget, _minimumTouchTarget});
     btn->onClick += {this, [this](const void* sender, int, int, int) {
         if (static_cast<void *>(_tabButton) == sender)
             return; // already selected
@@ -165,6 +167,13 @@ const std::string& Tabs::getActiveTabName() const
     if (_tabButton)
         return _tabButton->getText();
     return noTabName;
+}
+
+void Tabs::setMinimumTouchTarget(int size)
+{
+    _minimumTouchTarget = std::max(0, size);
+    for (auto* button : _buttons)
+        button->setMinimumHitSize({_minimumTouchTarget, _minimumTouchTarget});
 }
 
 void Tabs::relayout()

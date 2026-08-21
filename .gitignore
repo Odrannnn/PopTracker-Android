@@ -43,6 +43,7 @@ macosx/libs/
 
 # Android/Gradle build output and machine-local SDK settings
 android/.gradle/
+/.gradle-user/
 android/.idea/
 android/**/.cxx/
 android/**/build/

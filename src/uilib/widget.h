@@ -7,6 +7,7 @@
 #include "position.h"
 #include "spacing.h"
 #include "cursor.h"
+#include <algorithm>
 #include <string>
 
 #ifndef NDEBUG
@@ -138,6 +139,7 @@ protected:
     bool _dropShadow = false;
     bool _mouseInteraction = true;
     int _cornerRadius = 0;
+    Size _minimumHitSize = {0,0};
 
 public:
     virtual ~Widget()
@@ -183,9 +185,24 @@ public:
     virtual int getMaxX() const { return _pos.left + _size.width - 1; }
     virtual int getMaxY() const { return _pos.top + _size.height - 1; }
 
-    virtual bool isHit(int x, int y) const
+    bool isVisualHit(int x, int y) const
     {
         return _mouseInteraction && x>=getMinX() && x<=getMaxX() && y>=getMinY() && y<=getMaxY();
+    }
+
+    virtual bool isHit(int x, int y) const
+    {
+        if (!_mouseInteraction)
+            return false;
+        const int width = std::max(1, getMaxX() - getMinX() + 1);
+        const int height = std::max(1, getMaxY() - getMinY() + 1);
+        const int extraX = std::max(0, _minimumHitSize.width - width);
+        const int extraY = std::max(0, _minimumHitSize.height - height);
+        const int left = getMinX() - extraX / 2;
+        const int top = getMinY() - extraY / 2;
+        const int right = getMaxX() + extraX - extraX / 2;
+        const int bottom = getMaxY() + extraY - extraY / 2;
+        return x >= left && x <= right && y >= top && y <= bottom;
     }
 
     virtual const Widget* getHit(int x, int y) const
@@ -211,6 +228,19 @@ public:
     bool getDropShadow() const { return _dropShadow; }
     void setCornerRadius(int radius) { _cornerRadius = radius > 0 ? radius : 0; }
     int getCornerRadius() const { return _cornerRadius; }
+    void setMinimumHitSize(Size size) {
+        _minimumHitSize = {std::max(0, size.width), std::max(0, size.height)};
+    }
+    const Size& getMinimumHitSize() const { return _minimumHitSize; }
+    bool hasExpandedHitArea() const {
+        return _minimumHitSize.width > getMaxX() - getMinX() + 1 ||
+            _minimumHitSize.height > getMaxY() - getMinY() + 1;
+    }
+    long long hitCenterDistanceSquared(int x, int y) const {
+        const long long dx = 2LL * x - (getMinX() + getMaxX());
+        const long long dy = 2LL * y - (getMinY() + getMaxY());
+        return dx * dx + dy * dy;
+    }
 
     virtual bool isHover(Widget* w) const { return (w == this); }
 

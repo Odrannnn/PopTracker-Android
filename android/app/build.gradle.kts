@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.poptracker.android"
         minSdk = 21
         targetSdk = 35
-        versionCode = 35_04_001
-        versionName = "0.35.4-android.1"
+        versionCode = 35_04_002
+        versionName = "0.35.4-android.2"
 
         externalNativeBuild {
             cmake {

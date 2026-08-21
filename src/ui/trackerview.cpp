@@ -22,6 +22,9 @@
 #include "../uilib/timer.h"
 #include "../uilib/tooltip.h"
 #include "../uilib/vbox.h"
+#ifdef __ANDROID__
+#include "android_bridge.h"
+#endif
 
 namespace Ui {
 
@@ -102,6 +105,128 @@ static Label::VAlign str2itemValign(const std::string& s, Label::VAlign dflt=Lab
     return dflt;
 }
 
+#ifdef __ANDROID__
+namespace {
+
+enum MobileSectionKind : unsigned {
+    MOBILE_SECTION_NONE = 0,
+    MOBILE_SECTION_ITEMS = 1,
+    MOBILE_SECTION_MAPS = 2,
+    MOBILE_SECTION_OTHER = 4,
+};
+
+const LayoutNode* resolveLayoutReference(
+    Tracker* tracker, const LayoutNode* node, size_t& depth
+)
+{
+    while (node && node->getType() == "layout" && depth++ < 63)
+        node = &tracker->getLayout(node->getKey());
+    return depth <= 63 ? node : nullptr;
+}
+
+unsigned summarizeMobileSection(
+    Tracker* tracker, const LayoutNode& unresolvedNode, size_t depth = 0
+)
+{
+    const LayoutNode* node = resolveLayoutReference(tracker, &unresolvedNode, depth);
+    if (!node || depth > 63)
+        return MOBILE_SECTION_OTHER;
+    const std::string& type = node->getType();
+    if (type == "item" || type == "itemgrid")
+        return MOBILE_SECTION_ITEMS;
+    if (type == "map")
+        return MOBILE_SECTION_MAPS;
+    if (type == "text" || type == "recentpins" || type == "canvas")
+        return MOBILE_SECTION_OTHER;
+
+    unsigned result = MOBILE_SECTION_NONE;
+    for (const auto& child : node->getChildren())
+        result |= summarizeMobileSection(tracker, child, depth + 1);
+    return result == MOBILE_SECTION_NONE ? MOBILE_SECTION_OTHER : result;
+}
+
+std::string inferredMobileSectionTitle(
+    Tracker* tracker, const LayoutNode& node
+)
+{
+    if (!node.getHeader().empty())
+        return node.getHeader();
+    const unsigned kind = summarizeMobileSection(tracker, node);
+    if (kind == MOBILE_SECTION_ITEMS)
+        return "Items";
+    if (kind == MOBILE_SECTION_MAPS)
+        return "Maps";
+    return "Tracker";
+}
+
+std::string mobileSectionPathId(const std::vector<size_t>& path)
+{
+    std::string id = "root";
+    for (const size_t index : path)
+        id += "." + std::to_string(index);
+    return id;
+}
+
+bool extractMobileSections(
+    Tracker* tracker,
+    const LayoutNode& unresolvedNode,
+    std::vector<size_t> path,
+    std::vector<Ui::TrackerView::MobileSection>& result,
+    size_t depth = 0
+)
+{
+    const LayoutNode* node = resolveLayoutReference(tracker, &unresolvedNode, depth);
+    if (!node || depth > 63)
+        return false;
+
+    const std::string& type = node->getType();
+    const bool structural = type == "container" || type == "dock" || type == "array";
+    if (structural) {
+        const auto& children = node->getChildren();
+        if (children.empty())
+            return false;
+        if (children.size() == 1) {
+            path.push_back(0);
+            return extractMobileSections(
+                tracker, children.front(), std::move(path), result, depth + 1
+            );
+        }
+
+        std::vector<Ui::TrackerView::MobileSection> branches;
+        size_t index = 0;
+        for (const auto& child : children) {
+            auto childPath = path;
+            childPath.push_back(index++);
+            if (!extractMobileSections(
+                    tracker, child, std::move(childPath), branches, depth + 1))
+                return false;
+        }
+        result.insert(result.end(), branches.begin(), branches.end());
+        return true;
+    }
+
+    // Named groups and pack-authored tab sets are coherent sections. Keep a
+    // tabbed node intact so ActivateTab UI hints continue to target its native
+    // Tabs widget rather than the Android navigation wrapper.
+    const unsigned kind = summarizeMobileSection(tracker, *node, depth + 1);
+    const bool semanticLeaf = kind == MOBILE_SECTION_ITEMS || kind == MOBILE_SECTION_MAPS;
+    if (type != "group" && type != "tabbed" && !semanticLeaf)
+        return false;
+    if (type == "group" && node->getHeader().empty() && !semanticLeaf)
+        return false;
+
+    result.push_back({
+        mobileSectionPathId(path),
+        inferredMobileSectionTitle(tracker, *node),
+        std::move(path),
+        kind == MOBILE_SECTION_ITEMS,
+    });
+    return true;
+}
+
+} // namespace
+#endif
+
 Item* TrackerView::makeItem(int x, int y, int width, int height, const std::string& code)
 {
     return makeItem(x, y, width, height, _tracker->getItemByCode(code));
@@ -124,6 +249,13 @@ Item* TrackerView::makeItem(int x, int y, int width, int height, const ::BaseIte
     auto *w = new Item(x,y,width,height,_fontStore->getFont(DEFAULT_FONT_NAME,
             FontStore::sizeFromData(DEFAULT_FONT_SIZE, item->getOverlayFontSize())));
     w->setQuality(_defaultItemQuality);
+#ifdef __ANDROID__
+    const auto nativeUi = getNativeUiMetrics();
+    const int logicalTouchTarget = std::max(1, static_cast<int>(
+        std::ceil(nativeUi.touchTarget / _workspaceViewport.getZoom())
+    ));
+    w->setMinimumHitSize({logicalTouchTarget, logicalTouchTarget});
+#endif
     size_t stages = item->getStageCount();
     bool disabled = item->getAllowDisabled();
     bool stagedWithDisabled = item->getStageCount() && disabled;
@@ -281,7 +413,8 @@ Item* TrackerView::makeItem(int x, int y, int width, int height, const ::BaseIte
 }
 
 TrackerView::TrackerView(int x, int y, int w, int h, Tracker* tracker, const std::string& layoutRoot, FontStore *fontStore)
-    : SimpleContainer(x,y,w,h), _tracker(tracker), _layoutRoot(layoutRoot), _fontStore(fontStore)
+    : SimpleContainer(x,y,w,h), _tracker(tracker), _layoutRoot(layoutRoot), _fontStore(fontStore),
+      _workspaceViewport({w,h})
 {
     _font = _fontStore->getFont(DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE);
     _smallFont = _fontStore->getFont(DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE - 2);
@@ -328,6 +461,7 @@ TrackerView::TrackerView(int x, int y, int w, int h, Tracker* tracker, const std
 
 TrackerView::~TrackerView()
 {
+    saveWorkspaceState();
     releaseWorkspaceTexture();
     _tracker->onLayoutChanged -= this;
     _tracker->onStateChanged -= this;
@@ -346,28 +480,54 @@ TrackerView::~TrackerView()
 
 void TrackerView::relayout()
 {
-    const LayoutNode node = _tracker->getLayout(_layoutRoot);
+    const LayoutNode* node = resolveMobileSectionNode();
     _relayoutRequired = false;
     _tracker->onUiHint -= this; // stop recording hints
-    if (node.getType() != "") addLayoutNode(this, node);
+    if (node && node->getType() != "") {
+        addLayoutNode(this, *node);
+#ifdef __ANDROID__
+        // A branch that used to be docked beside another section should use
+        // the full page when selected by the Android navigation bar.
+        if (!_mobileSectionId.empty() && !_children.empty()) {
+            Widget* sectionRoot = _children.front();
+            _mobileSectionContentSize = {
+                std::max(sectionRoot->getWidth(), sectionRoot->getMinWidth()),
+                std::max(sectionRoot->getHeight(), sectionRoot->getMinHeight()),
+            };
+            sectionRoot->setGrow(1, 1);
+            sectionRoot->setSize({
+                std::max(1, _size.width - sectionRoot->getLeft()),
+                std::max(1, _size.height - sectionRoot->getTop()),
+            });
+        }
+#endif
+    }
     for (const auto& pair : _missedHints) { // replay missed layout hints
         _tracker->onUiHint.emit(_tracker, pair.first, pair.second);
     }
     _missedHints.clear();
+    updateMinimumTouchTargets();
     updateLocations();
 }
 
 void TrackerView::render(Renderer renderer, int offX, int offY)
 {
+    if (_workspaceStateDirty && elapsed(_workspaceStateChangedAt, 500))
+        saveWorkspaceState();
     if (!_tooltipTriggered && !_tooltipItem.empty() && elapsed(_tooltipTimer, Tooltip::delay)) {
         _tooltipTriggered = true;
         onItemTooltip.emit(this, _tooltipItem);
     }
     if (_relayoutRequired) {
         auto oldSize = _size;
+        _suspendWorkspacePersistence = true;
         setSize({300,200}); // FIXME: we should really fix relayout() at some point
         relayout();
         setSize(oldSize);
+        _suspendWorkspacePersistence = false;
+        updateWorkspaceStateKey();
+        applyMobileSectionAutoFit();
+        clampWorkspacePanToContent();
     }
     if (_mapsDirty) {
         updateLocationsNow();
@@ -379,7 +539,7 @@ void TrackerView::render(Renderer renderer, int offX, int offY)
     // first rendered at their authored layout size, then a selected source
     // region is stretched into the TrackerView bounds. This keeps every pack
     // widget and its hit coordinates in the same logical coordinate system.
-    if (_workspaceZoom <= 1.0f) {
+    if (!_workspaceViewport.isMagnified()) {
         _absX = offX+_pos.left;
         _absY = offY+_pos.top;
         Container::render(renderer, offX, offY);
@@ -397,9 +557,8 @@ void TrackerView::render(Renderer renderer, int offX, int offY)
         }
     }
     if (!_workspaceTexture) {
-        _workspaceZoom = 1.0f;
-        _workspacePanX = 0.0f;
-        _workspacePanY = 0.0f;
+        _workspaceViewport.reset();
+        workspaceZoomChanged();
         _absX = offX+_pos.left;
         _absY = offY+_pos.top;
         Container::render(renderer, offX, offY);
@@ -431,14 +590,7 @@ void TrackerView::render(Renderer renderer, int offX, int offY)
     SDL_RenderSetScale(renderer, oldScaleX, oldScaleY);
     SDL_RenderSetClipRect(renderer, oldClipEnabled ? &oldClip : nullptr);
 
-    const int sourceWidth = std::max(1, static_cast<int>(_size.width / _workspaceZoom + 0.5f));
-    const int sourceHeight = std::max(1, static_cast<int>(_size.height / _workspaceZoom + 0.5f));
-    const SDL_Rect source = {
-        static_cast<int>(_workspacePanX + 0.5f),
-        static_cast<int>(_workspacePanY + 0.5f),
-        std::min(sourceWidth, _size.width),
-        std::min(sourceHeight, _size.height)
-    };
+    const SDL_Rect source = _workspaceViewport.getSourceRect();
     const SDL_Rect destination = {
         offX + _pos.left, offY + _pos.top, _size.width, _size.height
     };
@@ -454,35 +606,21 @@ void TrackerView::releaseWorkspaceTexture()
     _workspaceTextureSize = {0,0};
 }
 
-void TrackerView::clampWorkspacePan()
-{
-    if (_workspaceZoom <= 1.0f) {
-        _workspaceZoom = 1.0f;
-        _workspacePanX = 0.0f;
-        _workspacePanY = 0.0f;
-        return;
-    }
-    const float maxPanX = std::max(0.0f, _size.width - _size.width / _workspaceZoom);
-    const float maxPanY = std::max(0.0f, _size.height - _size.height / _workspaceZoom);
-    _workspacePanX = std::max(0.0f, std::min(maxPanX, _workspacePanX));
-    _workspacePanY = std::max(0.0f, std::min(maxPanY, _workspacePanY));
-}
-
 void TrackerView::transformWorkspacePoint(int& x, int& y) const
 {
-    x = static_cast<int>(_workspacePanX + x / _workspaceZoom);
-    y = static_cast<int>(_workspacePanY + y / _workspaceZoom);
+    _workspaceViewport.screenToLogical(x, y);
 }
 
 bool TrackerView::prepareMouseDown(int& x, int& y, int button)
 {
-    if (_workspaceZoom > 1.0f && button == MouseButton::BUTTON_LEFT) {
+    _workspaceDragCandidate = false;
+    _workspaceDragging = false;
+    if (canPanWorkspace() && button == MouseButton::BUTTON_LEFT) {
         _workspaceDragCandidate = true;
-        _workspaceDragging = false;
         _workspaceDragStartX = x;
         _workspaceDragStartY = y;
-        _workspaceDragStartPanX = _workspacePanX;
-        _workspaceDragStartPanY = _workspacePanY;
+        _workspaceDragStartPanX = _workspaceViewport.getPanX();
+        _workspaceDragStartPanY = _workspaceViewport.getPanY();
     }
     transformWorkspacePoint(x, y);
     return true;
@@ -502,9 +640,12 @@ bool TrackerView::prepareMouseMove(int& x, int& y, unsigned buttons)
             }
         }
         if (_workspaceDragging) {
-            _workspacePanX = _workspaceDragStartPanX - deltaX / _workspaceZoom;
-            _workspacePanY = _workspaceDragStartPanY - deltaY / _workspaceZoom;
-            clampWorkspacePan();
+            _workspaceViewport.setPan(
+                _workspaceDragStartPanX - deltaX / _workspaceViewport.getZoom(),
+                _workspaceDragStartPanY - deltaY / _workspaceViewport.getZoom()
+            );
+            clampWorkspacePanToContent();
+            markWorkspaceStateChanged();
             return false;
         }
     }
@@ -517,8 +658,10 @@ bool TrackerView::prepareClick(int& x, int& y, int)
     const bool wasDragging = _workspaceDragging;
     _workspaceDragCandidate = false;
     _workspaceDragging = false;
-    if (wasDragging)
+    if (wasDragging) {
+        saveWorkspaceState();
         return false;
+    }
     transformWorkspacePoint(x, y);
     return true;
 }
@@ -527,18 +670,190 @@ bool TrackerView::preparePinch(int& x, int& y, float scale)
 {
     if (!std::isfinite(scale) || scale <= 0.0f)
         return false;
-    const float oldZoom = _workspaceZoom;
-    const float logicalX = _workspacePanX + x / oldZoom;
-    const float logicalY = _workspacePanY + y / oldZoom;
-    _workspaceZoom = std::max(1.0f, std::min(6.0f, oldZoom * scale));
-    if (_workspaceZoom < 1.01f)
-        _workspaceZoom = 1.0f;
-    _workspacePanX = logicalX - x / _workspaceZoom;
-    _workspacePanY = logicalY - y / _workspaceZoom;
-    clampWorkspacePan();
+    const bool changed = _workspaceViewport.setZoomAround(
+        _workspaceViewport.getZoom() * scale, x, y
+    );
+    clampWorkspacePanToContent();
     _workspaceDragCandidate = false;
     _workspaceDragging = false;
+    if (changed) {
+        markWorkspaceStateChanged();
+        workspaceZoomChanged();
+    }
     return false;
+}
+
+void TrackerView::cycleWorkspaceZoom()
+{
+    const float current = _workspaceViewport.getZoom();
+    const float next = current < 1.25f ? 1.5f :
+        current < 1.75f ? 2.0f :
+        current < 2.5f ? 3.0f : 1.0f;
+    if (_workspaceViewport.setZoomAround(next, _size.width / 2, _size.height / 2)) {
+        clampWorkspacePanToContent();
+        markWorkspaceStateChanged();
+        workspaceZoomChanged();
+    }
+}
+
+void TrackerView::resetWorkspaceView()
+{
+    const float zoom = getMobileSectionFillZoom();
+    const auto oldState = _workspaceViewport.getState();
+    _workspaceViewport.restore({zoom, 0.0f, 0.0f});
+    clampWorkspacePanToContent();
+    if (std::abs(oldState.zoom - _workspaceViewport.getZoom()) < 0.0001f &&
+            std::abs(oldState.panX) < 0.0001f &&
+            std::abs(oldState.panY) < 0.0001f)
+        return;
+    markWorkspaceStateChanged();
+    workspaceZoomChanged();
+    saveWorkspaceState();
+}
+
+void TrackerView::workspaceZoomChanged()
+{
+    updateMinimumTouchTargets();
+    onWorkspaceZoomChanged.emit(this, _workspaceViewport.getZoom());
+}
+
+float TrackerView::getMobileSectionFillZoom() const
+{
+#ifdef __ANDROID__
+    if (!_mobileSectionFillUndersized || _mobileSectionContentSize.width < 1 ||
+            _mobileSectionContentSize.height < 1 || _size.width < 1 ||
+            _size.height < 1)
+        return 1.0f;
+    const auto ui = getNativeUiMetrics();
+    const float availableWidth = static_cast<float>(
+        std::max(1, _size.width - 2 * ui.overlayMargin));
+    const float availableHeight = static_cast<float>(
+        std::max(1, _size.height - 2 * ui.overlayMargin));
+    const float fill = 0.94f * std::min(
+        availableWidth / _mobileSectionContentSize.width,
+        availableHeight / _mobileSectionContentSize.height
+    );
+    return std::max(1.0f, std::min(6.0f, fill));
+#else
+    return 1.0f;
+#endif
+}
+
+void TrackerView::applyMobileSectionAutoFit()
+{
+#ifdef __ANDROID__
+    if (!_mobileSectionAutoFitPending || _workspaceStateRestored)
+        return;
+    _mobileSectionAutoFitPending = false;
+    const float zoom = getMobileSectionFillZoom();
+    if (zoom <= 1.001f)
+        return;
+    _workspaceViewport.restore({zoom, 0.0f, 0.0f});
+    clampWorkspacePanToContent();
+    workspaceZoomChanged();
+#endif
+}
+
+bool TrackerView::canPanWorkspace() const
+{
+    if (!_workspaceViewport.isMagnified())
+        return false;
+#ifdef __ANDROID__
+    if (_mobileSectionFillUndersized && _mobileSectionContentSize.width > 0 &&
+            _mobileSectionContentSize.height > 0) {
+        const float visibleWidth = _size.width / _workspaceViewport.getZoom();
+        const float visibleHeight = _size.height / _workspaceViewport.getZoom();
+        return _mobileSectionContentSize.width > visibleWidth + 0.5f ||
+            _mobileSectionContentSize.height > visibleHeight + 0.5f;
+    }
+#endif
+    return true;
+}
+
+void TrackerView::clampWorkspacePanToContent()
+{
+#ifdef __ANDROID__
+    if (!_mobileSectionFillUndersized || _mobileSectionContentSize.width < 1 ||
+            _mobileSectionContentSize.height < 1)
+        return;
+    const float visibleWidth = _size.width / _workspaceViewport.getZoom();
+    const float visibleHeight = _size.height / _workspaceViewport.getZoom();
+    const float maxPanX = std::max(
+        0.0f, _mobileSectionContentSize.width - visibleWidth);
+    const float maxPanY = std::max(
+        0.0f, _mobileSectionContentSize.height - visibleHeight);
+    _workspaceViewport.setPan(
+        std::min(_workspaceViewport.getPanX(), maxPanX),
+        std::min(_workspaceViewport.getPanY(), maxPanY)
+    );
+#endif
+}
+
+void TrackerView::updateMinimumTouchTargets()
+{
+#ifdef __ANDROID__
+    const auto ui = getNativeUiMetrics();
+    const int logicalTarget = std::max(1, static_cast<int>(
+        std::ceil(ui.touchTarget / _workspaceViewport.getZoom())
+    ));
+    for (auto& pair : _items)
+        for (auto* item : pair.second)
+            item->setMinimumHitSize({logicalTarget, logicalTarget});
+    for (auto* tabs : _tabs)
+        tabs->setMinimumTouchTarget(logicalTarget);
+#endif
+}
+
+void TrackerView::markWorkspaceStateChanged()
+{
+    _workspaceStateDirty = true;
+    _workspaceStateChangedAt = getTicks();
+}
+
+void TrackerView::saveWorkspaceState()
+{
+#ifdef __ANDROID__
+    if (_workspaceStateKey.empty() || !_workspaceStateDirty)
+        return;
+    const auto state = _workspaceViewport.getState();
+    AndroidBridge::saveWorkspaceViewState(
+        _workspaceStateKey, state.zoom, state.panX, state.panY
+    );
+#endif
+    _workspaceStateDirty = false;
+}
+
+void TrackerView::updateWorkspaceStateKey()
+{
+#ifdef __ANDROID__
+    if (_suspendWorkspacePersistence || !_tracker || !_tracker->getPack() ||
+            _size.width < 1 || _size.height < 1)
+        return;
+    const Pack* pack = _tracker->getPack();
+    const std::string orientation = _size.width >= _size.height ? "landscape" : "portrait";
+    const std::string key = fmt::format(
+        "{}:{}:{}:{}:{}", pack->getUID(), pack->getVariant(), _layoutRoot,
+        _mobileSectionId.empty() ? "original" : _mobileSectionId, orientation
+    );
+    if (key == _workspaceStateKey)
+        return;
+
+    saveWorkspaceState();
+    _workspaceStateKey = key;
+    _workspaceViewport.reset();
+    float zoom = 1.0f;
+    float panX = 0.0f;
+    float panY = 0.0f;
+    _workspaceStateRestored = AndroidBridge::loadWorkspaceViewState(
+        key, zoom, panX, panY
+    );
+    if (_workspaceStateRestored)
+        _workspaceViewport.restore({zoom, panX, panY});
+    else if (_mobileSectionFillUndersized)
+        _mobileSectionAutoFitPending = true;
+    _workspaceStateDirty = false;
+    workspaceZoomChanged();
+#endif
 }
 
 std::list< std::pair<std::string,std::string> > TrackerView::getHints() const
@@ -605,6 +920,78 @@ void TrackerView::setHideUnreachableLocations(bool hide)
             map->setHideUnreachableLocations(hide);
         }
     }
+}
+
+std::vector<TrackerView::MobileSection> TrackerView::discoverMobileSections(
+    Tracker* tracker, const std::string& layoutRoot
+)
+{
+    std::vector<MobileSection> sections;
+#ifdef __ANDROID__
+    if (!tracker)
+        return sections;
+    const LayoutNode& root = tracker->getLayout(layoutRoot);
+    if (!extractMobileSections(tracker, root, {}, sections) ||
+            sections.size() < 2 || sections.size() > 8) {
+        sections.clear();
+        return sections;
+    }
+
+    std::map<std::string, size_t> totals;
+    for (const auto& section : sections)
+        totals[section.title]++;
+    std::map<std::string, size_t> seen;
+    for (auto& section : sections) {
+        const std::string originalTitle = section.title;
+        if (totals[originalTitle] > 1)
+            section.title += " " + std::to_string(++seen[originalTitle]);
+    }
+#else
+    (void)tracker;
+    (void)layoutRoot;
+#endif
+    return sections;
+}
+
+void TrackerView::setMobileSection(const MobileSection* section)
+{
+#ifdef __ANDROID__
+    const std::string id = section ? section->id : "";
+    const std::vector<size_t> path = section ? section->path : std::vector<size_t>{};
+    const bool fillUndersized = section && section->fillUndersized;
+    if (id == _mobileSectionId && path == _mobileSectionPath &&
+            fillUndersized == _mobileSectionFillUndersized)
+        return;
+    saveWorkspaceState();
+    _mobileSectionId = id;
+    _mobileSectionPath = path;
+    _mobileSectionContentSize = {};
+    _mobileSectionFillUndersized = fillUndersized;
+    _mobileSectionAutoFitPending = fillUndersized;
+    updateWorkspaceStateKey();
+    updateLayout("");
+#else
+    (void)section;
+#endif
+}
+
+const LayoutNode* TrackerView::resolveMobileSectionNode() const
+{
+    const LayoutNode* node = &_tracker->getLayout(_layoutRoot);
+#ifdef __ANDROID__
+    size_t depth = 0;
+    for (const size_t index : _mobileSectionPath) {
+        node = resolveLayoutReference(_tracker, node, depth);
+        if (!node || depth > 63 || index >= node->getChildren().size())
+            return &_tracker->getLayout(_layoutRoot);
+        auto child = node->getChildren().begin();
+        std::advance(child, index);
+        node = &*child;
+        depth++;
+    }
+    node = resolveLayoutReference(_tracker, node, depth);
+#endif
+    return node;
 }
 
 void TrackerView::updateLayout(const std::string& layout)
@@ -935,6 +1322,12 @@ bool TrackerView::addLayoutNode(Container* container, const LayoutNode& node, si
         //       1 child per tab + 1 title per tab
         //       + a private hbox for tab buttons
         Tabs *w = new Tabs(0,0,container->getWidth(),container->getHeight(),_font);
+#ifdef __ANDROID__
+        const auto nativeUi = getNativeUiMetrics();
+        w->setMinimumTouchTarget(std::max(1, static_cast<int>(
+            std::ceil(nativeUi.touchTarget / _workspaceViewport.getZoom())
+        )));
+#endif
         w->setDropShaodw(node.getDropShadow(container->getDropShadow()));
         w->setGrow(0,1); // required at the moment -- TODO: make this depend on children
         if (!node.getBackground().empty())
@@ -1313,7 +1706,29 @@ void TrackerView::setSize(Size size)
 {
     //if (size == _size) return;
     // TODO: resize on next frame?
+    const Size oldSize = _size;
+    const bool orientationChanged = oldSize.width > 0 && oldSize.height > 0 &&
+        size.width > 0 && size.height > 0 &&
+        (oldSize.width >= oldSize.height) != (size.width >= size.height);
     SimpleContainer::setSize(size);
+    _workspaceViewport.setViewport(size);
+    if (!_suspendWorkspacePersistence)
+        updateWorkspaceStateKey();
+#ifdef __ANDROID__
+    if (orientationChanged && !_suspendWorkspacePersistence) {
+        // Reusing a tree laid out for the opposite orientation leaves nested
+        // docks, groups and tabs with a mixture of old and new dimensions.
+        // Rebuild the selected pack subtree after the viewport state has moved
+        // to its orientation-specific key.
+        _workspaceDragCandidate = false;
+        _workspaceDragging = false;
+        _mobileSectionContentSize = {};
+        releaseWorkspaceTexture();
+        if (!_relayoutRequired)
+            updateLayout("");
+    }
+#endif
+    updateMinimumTouchTargets();
 }
 
 void TrackerView::addChild(Widget* child)

@@ -145,6 +145,28 @@ protected:
     Widget* _hoverChild = nullptr;
     Widget* _pressedChild = nullptr;
 
+    // Prefer normal topmost hit-testing. If a touch lands only inside several
+    // expanded accessibility targets, choose the nearest visual centre so
+    // dense desktop item grids remain predictable on a phone.
+    Widget* findPointerChild(int x, int y) const
+    {
+        Widget* nearest = nullptr;
+        long long nearestDistance = 0;
+        for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
+            Widget* child = *childIt;
+            if (!child->getVisible() || !child->isHit(x, y))
+                continue;
+            if (child->isVisualHit(x, y) || !child->hasExpandedHitArea())
+                return child;
+            const long long distance = child->hitCenterDistanceSquared(x, y);
+            if (!nearest || distance < nearestDistance) {
+                nearest = child;
+                nearestDistance = distance;
+            }
+        }
+        return nearest;
+    }
+
     // Specialized containers can map pointer coordinates into a transformed
     // child coordinate space, or consume an interaction before it reaches a
     // child. The default container remains a transparent event router.
@@ -159,29 +181,21 @@ protected:
         onMouseDown += { this, [this](void*, int x, int y, const int button) {
             if (!prepareMouseDown(x, y, button))
                 return;
-            for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
-                const auto child = *childIt;
-                if (child->getVisible() && child->isHit(x, y)) {
-                    _pressedChild = child;
-                    child->onMouseDown.emit(child, x - child->getLeft(), y - child->getTop(), button);
-                    break;
-                }
+            if (auto child = findPointerChild(x, y)) {
+                _pressedChild = child;
+                child->onMouseDown.emit(child, x - child->getLeft(), y - child->getTop(), button);
             }
         }};
         onClick += { this, [this](void*, int x, int y, const int button) {
             if (!prepareClick(x, y, button))
                 return;
-            for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
-                const auto child = *childIt;
-                if (child->getVisible() && child->isHit(x, y)) {
-                    const auto oldPressedChild = _pressedChild;
-                    if (oldPressedChild == child) {
-                        _pressedChild = nullptr;
-                        asm volatile("" ::: "memory"); // guarantee the onClick is gonna happen last
-                        child->onClick.emit(child, x - child->getLeft(), y - child->getTop(), button);
-                        return; // the onClick handler can have side effects, so we need to return immediately after
-                    }
-                    break;
+            if (auto child = findPointerChild(x, y)) {
+                const auto oldPressedChild = _pressedChild;
+                if (oldPressedChild == child) {
+                    _pressedChild = nullptr;
+                    asm volatile("" ::: "memory"); // guarantee the onClick is gonna happen last
+                    child->onClick.emit(child, x - child->getLeft(), y - child->getTop(), button);
+                    return; // the onClick handler can have side effects, so we need to return immediately after
                 }
             }
             if (const auto oldPressedChild = _pressedChild) {
@@ -194,25 +208,22 @@ protected:
                 return;
             auto oldHoverChild = _hoverChild;
             bool match = false;
-            for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
-                Widget* child = *childIt;
-                if (child->getVisible() && child->isHit(x, y)) {
-                    if (child != oldHoverChild) {
-                        if (oldHoverChild) {
-                            _hoverChild = nullptr;
-                            oldHoverChild->onMouseLeave.emit(oldHoverChild);
-                        }
-                        if (!hasChild(child)) // the above event could modify the container
-                            child = nullptr;
-                        _hoverChild = child;
-                        if (child)
-                            child->onMouseEnter.emit(_hoverChild, x-child->getLeft(), y-child->getTop(), buttons);
+            Widget* child = findPointerChild(x, y);
+            if (child) {
+                if (child != oldHoverChild) {
+                    if (oldHoverChild) {
+                        _hoverChild = nullptr;
+                        oldHoverChild->onMouseLeave.emit(oldHoverChild);
                     }
-                    if (child) {
-                        child->onMouseMove.emit(child, x-child->getLeft(), y-child->getTop(), buttons);
-                        match = true;
-                        break;
-                    }
+                    if (!hasChild(child)) // the above event could modify the container
+                        child = nullptr;
+                    _hoverChild = child;
+                    if (child)
+                        child->onMouseEnter.emit(_hoverChild, x-child->getLeft(), y-child->getTop(), buttons);
+                }
+                if (child) {
+                    child->onMouseMove.emit(child, x-child->getLeft(), y-child->getTop(), buttons);
+                    match = true;
                 }
             }
             if (!match)
@@ -239,13 +250,9 @@ protected:
         onPinch += { this, [this](void*, int x, int y, const float scale) {
             if (!preparePinch(x, y, scale))
                 return;
-            for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
-                const auto child = *childIt;
-                if (child->getVisible() && child->isHit(x, y)) {
-                    child->onPinch.emit(child,
-                        x - child->getLeft(), y - child->getTop(), scale);
-                    break;
-                }
+            if (auto child = findPointerChild(x, y)) {
+                child->onPinch.emit(child,
+                    x - child->getLeft(), y - child->getTop(), scale);
             }
         }};
     }
